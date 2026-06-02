@@ -383,24 +383,78 @@ fn glyph_name_to_char(name: &str) -> Option<char> {
             return char::from_u32(cp);
         }
     }
+    // uXXXX / uniXXXX handled above; also accept "gNN"/"cidNN" -> no unicode.
     let c = match name {
-        "space" => ' ',
+        // whitespace & punctuation
+        "space" | "nbspace" => ' ',
         "period" => '.',
         "comma" => ',',
         "colon" => ':',
         "semicolon" => ';',
-        "hyphen" => '-',
+        "exclam" => '!',
+        "question" => '?',
+        "quotesingle" => '\'',
+        "quotedbl" => '"',
+        "grave" => '`',
+        "asciitilde" => '~',
+        "asciicircum" => '^',
+        "underscore" => '_',
+        "hyphen" | "sfthyphen" => '-',
         "endash" => '\u{2013}',
         "emdash" => '\u{2014}',
         "quoteleft" => '\u{2018}',
         "quoteright" => '\u{2019}',
         "quotedblleft" => '\u{201C}',
         "quotedblright" => '\u{201D}',
+        "quotesinglbase" => '\u{201A}',
+        "quotedblbase" => '\u{201E}',
         "bullet" => '\u{2022}',
+        "dagger" => '\u{2020}',
+        "daggerdbl" => '\u{2021}',
+        "ellipsis" => '\u{2026}',
         "parenleft" => '(',
         "parenright" => ')',
+        "bracketleft" => '[',
+        "bracketright" => ']',
+        "braceleft" => '{',
+        "braceright" => '}',
         "slash" => '/',
-        "ellipsis" => '\u{2026}',
+        "backslash" => '\\',
+        "bar" => '|',
+        "at" => '@',
+        "numbersign" => '#',
+        "dollar" => '$',
+        "percent" => '%',
+        "ampersand" => '&',
+        "asterisk" => '*',
+        "plus" => '+',
+        "equal" => '=',
+        "less" => '<',
+        "greater" => '>',
+        "degree" => '\u{00B0}',
+        "euro" => '\u{20AC}',
+        "sterling" => '\u{00A3}',
+        "cent" => '\u{00A2}',
+        "yen" => '\u{00A5}',
+        "section" => '\u{00A7}',
+        "paragraph" => '\u{00B6}',
+        "copyright" => '\u{00A9}',
+        "registered" => '\u{00AE}',
+        "trademark" => '\u{2122}',
+        "periodcentered" => '\u{00B7}',
+        "guillemotleft" => '\u{00AB}',
+        "guillemotright" => '\u{00BB}',
+        "guilsinglleft" => '\u{2039}',
+        "guilsinglright" => '\u{203A}',
+        "minus" => '\u{2212}',
+        "fraction" => '\u{2044}',
+        // ligatures
+        "fi" => '\u{FB01}',
+        "fl" => '\u{FB02}',
+        "ff" => '\u{FB00}',
+        "ffi" => '\u{FB03}',
+        "ffl" => '\u{FB04}',
+        // number words
         "zero" => '0',
         "one" => '1',
         "two" => '2',
@@ -411,6 +465,31 @@ fn glyph_name_to_char(name: &str) -> Option<char> {
         "seven" => '7',
         "eight" => '8',
         "nine" => '9',
+        _ => return single_letter_glyph(name),
+    };
+    Some(c)
+}
+
+/// Adobe convention: a single ASCII letter glyph is named by that letter
+/// ("A".."z"); accented letters like "eacute" map via a small table.
+fn single_letter_glyph(name: &str) -> Option<char> {
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if chars.next().is_none() && first.is_ascii_alphabetic() {
+        return Some(first);
+    }
+    let c = match name {
+        "aacute" => 'á', "agrave" => 'à', "acircumflex" => 'â', "atilde" => 'ã',
+        "adieresis" => 'ä', "aring" => 'å', "ae" => 'æ', "ccedilla" => 'ç',
+        "eacute" => 'é', "egrave" => 'è', "ecircumflex" => 'ê', "edieresis" => 'ë',
+        "iacute" => 'í', "igrave" => 'ì', "icircumflex" => 'î', "idieresis" => 'ï',
+        "ntilde" => 'ñ', "oacute" => 'ó', "ograve" => 'ò', "ocircumflex" => 'ô',
+        "otilde" => 'õ', "odieresis" => 'ö', "oslash" => 'ø', "oe" => 'œ',
+        "uacute" => 'ú', "ugrave" => 'ù', "ucircumflex" => 'û', "udieresis" => 'ü',
+        "yacute" => 'ý', "ydieresis" => 'ÿ', "germandbls" => 'ß',
+        "Aacute" => 'Á', "Agrave" => 'À', "Adieresis" => 'Ä', "Ccedilla" => 'Ç',
+        "Eacute" => 'É', "Egrave" => 'È', "Edieresis" => 'Ë', "Ntilde" => 'Ñ',
+        "Oacute" => 'Ó', "Odieresis" => 'Ö', "Oslash" => 'Ø', "Udieresis" => 'Ü',
         _ => return None,
     };
     Some(c)
