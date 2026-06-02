@@ -132,10 +132,16 @@ fn collect_kids(
 fn gather_own_mcids(
     doc: &Document,
     elem: &Dictionary,
-    pg: Option<ObjectId>,
+    inherited_pg: Option<ObjectId>,
     page_index: &HashMap<ObjectId, usize>,
 ) -> Vec<(usize, i32)> {
     let mut out = Vec::new();
+    // Prefer this element's own /Pg over the inherited one.
+    let pg = elem
+        .get(b"Pg")
+        .ok()
+        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+        .or(inherited_pg);
     let Ok(k) = elem.get(b"K") else { return out };
     for item in flatten_k(doc, k) {
         match item {

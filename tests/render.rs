@@ -141,15 +141,24 @@ fn hidden_text_is_filtered_by_content_safety() {
 }
 
 #[test]
-fn tagged_pdf_has_structure_tree() {
+fn tagged_pdf_has_marked_content_and_round_trips() {
     let a = analyze_file("lorem.pdf");
     let tmp = std::env::temp_dir().join("pdfrs_tagged.pdf");
     pdf_rs::render::tagged::write_tagged_pdf(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
     let bytes = std::fs::read(&tmp).unwrap();
     assert!(bytes.windows(14).any(|w| w == b"StructTreeRoot"), "has struct tree root");
-    // Re-loadable.
+    assert!(bytes.windows(3).any(|w| w == b"BDC"), "content has marked-content");
+
+    // Re-load: runs carry MCIDs and the structure tree maps back to text.
     let again = LopdfBackend::load(&tmp, None, None).unwrap();
-    assert!(!again.pages.is_empty());
+    assert!(again.structure.is_some(), "tagged output has a structure tree");
+    assert!(again.pages[0].runs.iter().any(|r| r.mcid.is_some()), "runs carry MCIDs");
+
+    // Reading our own tags reconstructs the heading + paragraph.
+    let via_tags = analyze(&again, &Options { use_struct_tree: true, ..Default::default() });
+    let md = render::to_markdown(&via_tags, &RenderOptions::default());
+    assert!(md.starts_with("# Lorem Ipsum"), "struct-tree read recovers heading:\n{md}");
+    assert!(md.to_lowercase().contains("dolor sit amet"), "and the paragraph");
 }
 
 #[test]
