@@ -59,6 +59,8 @@ fn process_one(
             include_header_footer: cli.include_header_footer,
             content_safety: !cli.content_safety_off,
             sanitize: cli.sanitize,
+            threads: cli.threads.max(1),
+            use_struct_tree: cli.use_struct_tree,
         },
     );
 

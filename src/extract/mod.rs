@@ -84,6 +84,8 @@ pub struct TextRun {
     pub italic: bool,
     /// RGB in 0..=1.
     pub color: [f64; 3],
+    /// Marked-content id of the enclosing BDC, if any (for tagged PDFs).
+    pub mcid: Option<i32>,
 }
 
 /// A placed image XObject.
@@ -128,10 +130,23 @@ pub struct PdfMeta {
     pub modification_date: Option<String>,
 }
 
+/// A node in the PDF logical structure tree (tagged PDFs).
+#[derive(Clone, Debug)]
+pub struct StructElem {
+    /// Structure type tag, e.g. "H1", "P", "L", "LI", "Table", "Figure".
+    pub tag: String,
+    pub alt: Option<String>,
+    /// (page 1-indexed, mcid) for marked-content this element owns directly.
+    pub mcids: Vec<(usize, i32)>,
+    pub kids: Vec<StructElem>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Document {
     pub meta: PdfMeta,
     pub pages: Vec<Page>,
+    /// Root of the logical structure tree, if the PDF is tagged.
+    pub structure: Option<StructElem>,
 }
 
 /// A pluggable PDF extraction backend.

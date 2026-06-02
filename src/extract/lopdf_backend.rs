@@ -29,6 +29,8 @@ impl super::PdfBackend for LopdfBackend {
         }
 
         let meta = read_meta(&doc);
+        let page_index = page_number_map(&doc);
+        let structure = parse_structure(&doc, &page_index);
         let mut out_pages = Vec::new();
         for (page_num, page_id) in doc.get_pages() {
             let n = page_num as usize;
@@ -51,7 +53,130 @@ impl super::PdfBackend for LopdfBackend {
                 }
             }
         }
-        Ok(super::Document { meta, pages: out_pages })
+        Ok(super::Document { meta, pages: out_pages, structure })
+    }
+}
+
+/// Map each page's ObjectId to its 1-indexed page number.
+fn page_number_map(doc: &Document) -> HashMap<ObjectId, usize> {
+    doc.get_pages().into_iter().map(|(n, id)| (id, n as usize)).collect()
+}
+
+/// Parse the logical structure tree (StructTreeRoot) if present.
+fn parse_structure(doc: &Document, page_index: &HashMap<ObjectId, usize>) -> Option<super::StructElem> {
+    let root = doc.catalog().ok()?;
+    let str_ref = root.get(b"StructTreeRoot").ok()?;
+    let str_root = resolve(doc, str_ref).ok()?.as_dict().ok()?.clone();
+    let mut kids = Vec::new();
+    collect_kids(doc, &str_root, None, page_index, &mut kids, 0);
+    Some(super::StructElem { tag: "Document".into(), alt: None, mcids: vec![], kids })
+}
+
+fn collect_kids(
+    doc: &Document,
+    parent: &Dictionary,
+    inherited_pg: Option<ObjectId>,
+    page_index: &HashMap<ObjectId, usize>,
+    out: &mut Vec<super::StructElem>,
+    depth: usize,
+) {
+    if depth > 50 {
+        return;
+    }
+    let pg = parent
+        .get(b"Pg")
+        .ok()
+        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+        .or(inherited_pg);
+    let Ok(k) = parent.get(b"K") else { return };
+    let items = flatten_k(doc, k);
+    for item in items {
+        match item {
+            // Direct MCID integer -> belongs to the parent element.
+            Object::Integer(_n) => { /* handled by build_elem reading parent's own mcids */ }
+            Object::Dictionary(d) => {
+                if let Ok(Object::Name(s)) = d.get(b"S") {
+                    // Child structure element.
+                    let tag = String::from_utf8_lossy(s).into_owned();
+                    let alt = d
+                        .get(b"Alt")
+                        .ok()
+                        .and_then(|o| if let Object::String(b, _) = o { Some(decode_pdf_text(b)) } else { None });
+                    let mcids = gather_own_mcids(doc, &d, pg, page_index);
+                    let mut child_kids = Vec::new();
+                    collect_kids(doc, &d, pg, page_index, &mut child_kids, depth + 1);
+                    out.push(super::StructElem { tag, alt, mcids, kids: child_kids });
+                }
+            }
+            Object::Reference(id) => {
+                if let Ok(d) = doc.get_dictionary(id).map(|d| d.clone()) {
+                    if let Ok(Object::Name(s)) = d.get(b"S") {
+                        let tag = String::from_utf8_lossy(s).into_owned();
+                        let alt = d.get(b"Alt").ok().and_then(|o| {
+                            if let Object::String(b, _) = o { Some(decode_pdf_text(b)) } else { None }
+                        });
+                        let mcids = gather_own_mcids(doc, &d, pg, page_index);
+                        let mut child_kids = Vec::new();
+                        collect_kids(doc, &d, pg, page_index, &mut child_kids, depth + 1);
+                        out.push(super::StructElem { tag, alt, mcids, kids: child_kids });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// MCIDs owned directly by an element (integer kids, or MCR dicts).
+fn gather_own_mcids(
+    doc: &Document,
+    elem: &Dictionary,
+    pg: Option<ObjectId>,
+    page_index: &HashMap<ObjectId, usize>,
+) -> Vec<(usize, i32)> {
+    let mut out = Vec::new();
+    let Ok(k) = elem.get(b"K") else { return out };
+    for item in flatten_k(doc, k) {
+        match item {
+            Object::Integer(n) => {
+                if let Some(p) = pg.and_then(|id| page_index.get(&id)) {
+                    out.push((*p, n as i32));
+                }
+            }
+            Object::Dictionary(d) => {
+                if d.get(b"Type").ok().and_then(name_of) == Some("MCR".to_string()) {
+                    let mpg = d
+                        .get(b"Pg")
+                        .ok()
+                        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+                        .or(pg);
+                    if let (Ok(Object::Integer(n)), Some(p)) =
+                        (d.get(b"MCID"), mpg.and_then(|id| page_index.get(&id)))
+                    {
+                        out.push((*p, *n as i32));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn name_of(o: &Object) -> Option<String> {
+    if let Object::Name(n) = o {
+        Some(String::from_utf8_lossy(n).into_owned())
+    } else {
+        None
+    }
+}
+
+/// Normalize /K into a flat list of owned `Object`s (resolving arrays).
+fn flatten_k(doc: &Document, k: &Object) -> Vec<Object> {
+    match k {
+        Object::Array(a) => a.iter().map(|o| resolve(doc, o).cloned().unwrap_or(Object::Null)).collect(),
+        Object::Reference(_) => vec![resolve(doc, k).cloned().unwrap_or(Object::Null)],
+        other => vec![other.clone()],
     }
 }
 
@@ -127,6 +252,8 @@ struct Interp<'a> {
     h_scale: f64, // 1.0 == 100%
     leading: f64,
     rise: f64,
+    // marked content (tagged PDFs)
+    mcid_stack: Vec<Option<i32>>,
     // path
     cur: (f64, f64),
     subpath_start: (f64, f64),
@@ -155,6 +282,7 @@ impl<'a> Interp<'a> {
             h_scale: 1.0,
             leading: 0.0,
             rise: 0.0,
+            mcid_stack: Vec::new(),
             cur: (0.0, 0.0),
             subpath_start: (0.0, 0.0),
             pending_lines: Vec::new(),
@@ -296,6 +424,11 @@ impl<'a> Interp<'a> {
                     self.commit_path();
                 }
                 "n" => self.pending_lines.clear(),
+                // marked content
+                "BDC" | "BMC" => self.mcid_stack.push(extract_mcid(a)),
+                "EMC" => {
+                    self.mcid_stack.pop();
+                }
                 // images
                 "Do" => self.do_xobject(a),
                 _ => {}
@@ -408,6 +541,7 @@ impl<'a> Interp<'a> {
             bold: font.bold,
             italic: font.italic,
             color: self.fill_color,
+            mcid: self.mcid_stack.iter().rev().find_map(|m| *m),
         });
     }
 
@@ -435,6 +569,16 @@ impl<'a> Interp<'a> {
             }
         }
     }
+}
+
+/// Extract /MCID from BDC operands `[/Tag <</MCID n ...>>]`.
+fn extract_mcid(a: &[Object]) -> Option<i32> {
+    if let Some(Object::Dictionary(d)) = a.get(1) {
+        if let Ok(Object::Integer(n)) = d.get(b"MCID") {
+            return Some(*n as i32);
+        }
+    }
+    None
 }
 
 fn seg(p0: (f64, f64), p1: (f64, f64)) -> LineSeg {

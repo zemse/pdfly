@@ -6,6 +6,7 @@
 
 pub mod reading_order;
 pub mod sanitize;
+pub mod structured;
 pub mod tables;
 
 use crate::extract::{Document, Rect, TextRun};
@@ -21,24 +22,54 @@ pub struct Options {
     pub content_safety: bool,
     /// Redact emails/URLs/phones/etc.
     pub sanitize: bool,
+    /// Worker threads for per-page line assembly (>=1). Output is identical
+    /// regardless of count (each page is processed independently, in order).
+    pub threads: usize,
+    /// Use the PDF's own structure tree (tagged PDFs) instead of heuristics.
+    pub use_struct_tree: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { include_header_footer: false, content_safety: true, sanitize: false }
+        Options {
+            include_header_footer: false,
+            content_safety: true,
+            sanitize: false,
+            threads: 1,
+            use_struct_tree: false,
+        }
     }
 }
 
 pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
+    // Tagged-PDF path: trust the author's structure tree when asked and available.
+    if opts.use_struct_tree {
+        if let Some(elements) = structured::structured_elements(doc) {
+            let mut analyzed =
+                AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements };
+            if opts.sanitize {
+                sanitize::sanitize_doc(&mut analyzed);
+            }
+            return analyzed;
+        }
+        eprintln!("note: no usable structure tree; falling back to heuristic analysis");
+    }
+
     let mut elements: Vec<Element> = Vec::new();
     let mut heading_sizes: Vec<f64> = Vec::new();
 
-    // Phase A: per-page filtered lines.
-    let mut page_lines: Vec<Vec<Line>> = Vec::with_capacity(doc.pages.len());
-    for page in &doc.pages {
+    // Phase A: per-page filtered lines. Independent per page -> parallelizable
+    // while preserving order (collect keeps input order).
+    let build_page = |page: &crate::extract::Page| {
         let runs = filter_runs(&page.runs, page.media_box, opts.content_safety);
-        page_lines.push(build_lines(&runs));
-    }
+        build_lines(&runs)
+    };
+    let page_lines: Vec<Vec<Line>> = if opts.threads > 1 {
+        use rayon::prelude::*;
+        doc.pages.par_iter().map(build_page).collect()
+    } else {
+        doc.pages.iter().map(build_page).collect()
+    };
 
     // Phase B: detect repeating headers/footers across pages.
     let drop_set = if opts.include_header_footer {

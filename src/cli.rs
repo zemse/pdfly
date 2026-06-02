@@ -55,6 +55,14 @@ pub struct Cli {
     #[arg(long)]
     pub sanitize: bool,
 
+    /// Worker threads for per-page processing (default 1). Output is deterministic.
+    #[arg(long, default_value_t = 1)]
+    pub threads: usize,
+
+    /// Use the PDF's own tag tree (tagged PDFs) instead of layout heuristics.
+    #[arg(long)]
+    pub use_struct_tree: bool,
+
     /// Write the single requested format to stdout instead of files.
     #[arg(long)]
     pub to_stdout: bool,

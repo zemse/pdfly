@@ -1,0 +1,24 @@
+pdf-rs
+Copyright 2026 Soham Zemse <soham@zemse.in>
+
+This product is a clean-room Rust reimplementation. No source code was copied
+from the projects below; their algorithms and behavior were studied and
+reimplemented independently in Rust.
+
+References:
+
+- opendataloader-pdf (Apache License 2.0)
+  https://github.com/opendataloader-project/opendataloader-pdf
+  Output mapping (Markdown/JSON/HTML), pipeline structure, and the XY-Cut++
+  reading-order algorithm (`XYCutPlusPlusSorter`) were referenced.
+
+- veraPDF wcag-algorithms (GNU GPL v3 / MPL 2.0)
+  https://github.com/veraPDF/veraPDF-wcag-algs
+  Layout/semantic heuristics (headings, lists, table borders, contrast) were
+  studied for algorithm logic only — not translated.
+
+- Mozilla pdf.js (Apache License 2.0) and ISO 32000-1
+  Referenced for the PDF content-stream interpreter, fonts, and encodings.
+
+Third-party Rust dependencies are listed in Cargo.toml and retain their own
+licenses.
