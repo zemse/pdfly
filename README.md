@@ -98,12 +98,16 @@ veraPDF's `wcag-algorithms`.
 ## Known limitations
 
 - Dense multi-column academic papers (full-width abstract over a two-column body)
-  can interleave in reading order.
-- Fonts with custom encodings and no `/ToUnicode` map may mis-decode glyphs.
-- Tables: borderless tables and row/column spans are not yet inferred.
-- Image bytes are not extracted yet (images are located and referenced by name).
-- AI/hybrid features (OCR, formulas, chart descriptions) and tagged-PDF writing
-  are out of scope.
+  can still interleave in reading order (improved, not perfect).
+- Type1 (`FontFile`) subset fonts with non-standard built-in encodings and no
+  `/ToUnicode` may still mis-decode (embedded TrueType/CFF and standard glyph
+  names now decode).
+- Bordered table detection can over-trigger on ruled figures; borderless
+  detection (`--table-method cluster`) is conservative and opt-in.
+- `--tagged-pdf` writes marked content + a structure tree (round-trips via
+  `--use-struct-tree`) but does not yet emit a `/ParentTree` or run formal
+  PDF/UA conformance validation.
+- LaTeX formulas and chart/image descriptions need local ML models (not built).
 
 ## Tests
 

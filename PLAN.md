@@ -16,10 +16,16 @@ way to test it.
 > writing), `--annotate` (debug PDF), `--threads`, and optional OCR (`--features ocr`). Whole corpus
 > converts to all formats with no panics; 14 tests pass.
 >
+> Plus, from the follow-up backlog: **table row/col-span inference** (lattice cell merging),
+> **borderless tables** (`--table-method cluster`), **expanded glyph-name decoding** (Type1/Differences
+> with standard names), and **tagged-PDF marked-content (MCID) association** (`--tagged-pdf` now
+> writes BDC/EMC marks + a struct tree that round-trips via `--use-struct-tree`).
+>
 > **Still partial/deferred (documented):** dense multi-column reading order (improved, not perfect);
-> Type1 (FontFile) font programs; borderless/clustered tables + row/col-span inference; tagged-PDF
-> marked-content (MCID) association + PDF/UA conformance; Korean special-form tables; ML stretch
-> items (LaTeX formulas, chart descriptions). The hybrid AI server is intentionally dropped.
+> Type1 (FontFile) charstring programs with non-standard built-in encodings; tagged-PDF `/ParentTree`
+> (reverse map) + formal PDF/UA conformance validation; bordered detection can over-trigger on ruled
+> figures; Korean special-form tables; ML stretch (LaTeX formulas, chart descriptions). The hybrid AI
+> server is intentionally dropped.
 
 > **Companion doc:** [ARCHITECTURE.md](./ARCHITECTURE.md) is the detailed map of *how the source
 > works* — the exact pipeline order, per-processor purpose, the XY-Cut++ algorithm, and clickable
