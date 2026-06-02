@@ -15,9 +15,20 @@ const TOL: f64 = 3.0;
 /// Detect tables on a page from its line segments + text lines.
 /// Returns detected tables and the set of line indices they consumed.
 pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
-    // Cluster horizontal y's and vertical x's.
-    let mut ys: Vec<f64> = lines.iter().filter(|l| l.is_horizontal()).map(|l| l.y0).collect();
-    let mut xs: Vec<f64> = lines.iter().filter(|l| l.is_vertical()).map(|l| l.x0).collect();
+    // Cluster horizontal y's and vertical x's. Only segments long enough to be
+    // real rules count as grid lines — short ticks/underlines would otherwise
+    // inflate the column/row count and manufacture sparse "tables".
+    const MIN_RULE: f64 = 10.0;
+    let mut ys: Vec<f64> = lines
+        .iter()
+        .filter(|l| l.is_horizontal() && (l.x1 - l.x0).abs() >= MIN_RULE)
+        .map(|l| l.y0)
+        .collect();
+    let mut xs: Vec<f64> = lines
+        .iter()
+        .filter(|l| l.is_vertical() && (l.y1 - l.y0).abs() >= MIN_RULE)
+        .map(|l| l.x0)
+        .collect();
     let ys = cluster(&mut ys);
     let xs = cluster(&mut xs);
 
@@ -154,11 +165,17 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
     // and a decent fill, else treat as ordinary text (avoids fabricating
     // huge empty tables from stray rules / backgrounds).
     let filled = rows.iter().flatten().filter(|c| !c.text.trim().is_empty()).count();
-    let rows_with_text = rows.iter().filter(|r| r.iter().any(|c| !c.text.trim().is_empty())).count();
     let cols_with_text = (0..n_cols)
         .filter(|&c| rows.iter().any(|r| r.get(c).map(|x| !x.text.trim().is_empty()).unwrap_or(false)))
         .count();
-    if !any_text || filled < 4 || rows_with_text < 2 || cols_with_text < 2 {
+    // Genuinely tabular: at least two rows that each have >=2 filled cells, and
+    // a non-trivial fill ratio (rejects sparse layout/figure grids).
+    let rows_multi = rows
+        .iter()
+        .filter(|r| r.iter().filter(|c| !c.text.trim().is_empty()).count() >= 2)
+        .count();
+    let fill_ratio = filled as f64 / (n_rows * n_cols).max(1) as f64;
+    if !any_text || filled < 4 || rows_multi < 2 || cols_with_text < 2 || fill_ratio < 0.15 {
         return (vec![], vec![]);
     }
 
