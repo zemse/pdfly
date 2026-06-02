@@ -25,7 +25,7 @@ pub fn render_elements(elements: &[Element], opts: &RenderOptions, out: &mut Str
             }
             last_page = el.page();
         }
-        render_one(el, out);
+        render_one(el, opts, out);
         out.push('\n');
     }
     // collapse trailing blank lines to a single newline
@@ -34,7 +34,7 @@ pub fn render_elements(elements: &[Element], opts: &RenderOptions, out: &mut Str
     }
 }
 
-fn render_one(el: &Element, out: &mut String) {
+fn render_one(el: &Element, opts: &RenderOptions, out: &mut String) {
     match el {
         Element::Heading { level, text, .. } => {
             for _ in 0..(*level).clamp(1, 6) {
@@ -68,7 +68,13 @@ fn render_one(el: &Element, out: &mut String) {
                 out.push('\n');
             }
         }
-        Element::Table { rows, .. } => render_table(rows, out),
+        Element::Table { rows, .. } => {
+            if opts.html_tables {
+                render_table_html(rows, out);
+            } else {
+                render_table(rows, out);
+            }
+        }
         Element::Image { name, alt, .. } => {
             out.push_str(&format!("![{}]({})\n", escape_inline(alt), name));
         }
@@ -110,6 +116,31 @@ fn render_table(rows: &[Vec<Cell>], out: &mut String) {
         }
         out.push('\n');
     }
+}
+
+/// Raw HTML table (for merged cells GFM can't express).
+fn render_table_html(rows: &[Vec<Cell>], out: &mut String) {
+    out.push_str("<table>\n");
+    for (r, row) in rows.iter().enumerate() {
+        out.push_str("  <tr>\n");
+        let tag = if r == 0 { "th" } else { "td" };
+        for cell in row {
+            let mut attrs = String::new();
+            if cell.col_span > 1 {
+                attrs.push_str(&format!(" colspan=\"{}\"", cell.col_span));
+            }
+            if cell.row_span > 1 {
+                attrs.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
+            }
+            out.push_str(&format!("    <{tag}{attrs}>{}</{tag}>\n", html_escape(cell.text.trim())));
+        }
+        out.push_str("  </tr>\n");
+    }
+    out.push_str("</table>\n");
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 fn escape_inline(s: &str) -> String {

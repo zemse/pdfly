@@ -61,10 +61,14 @@ fn process_one(
             sanitize: cli.sanitize,
             threads: cli.threads.max(1),
             use_struct_tree: cli.use_struct_tree,
+            detect_strikethrough: cli.detect_strikethrough,
         },
     );
 
-    let ropts = RenderOptions { page_separator: cli.page_separator.clone() };
+    let ropts = RenderOptions {
+        page_separator: cli.page_separator.clone(),
+        html_tables: cli.markdown_with_html,
+    };
     let out_dir = cli.output_dir.clone().unwrap_or_else(|| {
         file.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
     });

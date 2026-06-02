@@ -86,6 +86,8 @@ pub struct TextRun {
     pub color: [f64; 3],
     /// Marked-content id of the enclosing BDC, if any (for tagged PDFs).
     pub mcid: Option<i32>,
+    /// Declared-invisible text (render mode 3/7) — AI-safety signal.
+    pub hidden: bool,
 }
 
 /// A placed image XObject.

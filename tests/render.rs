@@ -76,6 +76,68 @@ fn images_extract_to_files() {
 }
 
 #[test]
+fn markdown_html_table_mode() {
+    use pdf_rs::extract::{PdfMeta, Rect};
+    use pdf_rs::model::{AnalyzedDoc, Cell, Element};
+    let doc = AnalyzedDoc {
+        meta: PdfMeta::default(),
+        num_pages: 1,
+        elements: vec![Element::Table {
+            rows: vec![
+                vec![Cell { text: "A".into(), col_span: 2, row_span: 1 }],
+                vec![
+                    Cell { text: "b".into(), col_span: 1, row_span: 1 },
+                    Cell { text: "c".into(), col_span: 1, row_span: 1 },
+                ],
+            ],
+            bbox: Rect::new(0.0, 0.0, 10.0, 10.0),
+            page: 1,
+        }],
+    };
+    let opts = RenderOptions { html_tables: true, ..Default::default() };
+    let md = render::to_markdown(&doc, &opts);
+    assert!(md.contains("<table>") && md.contains("colspan=\"2\""), "html table with span:\n{md}");
+
+    let gfm = render::to_markdown(&doc, &RenderOptions::default());
+    assert!(gfm.contains("| --- |"), "default is GFM pipe table");
+}
+
+#[test]
+fn hidden_text_is_filtered_by_content_safety() {
+    use pdf_rs::extract::{Document, Page, PdfMeta, Rect, TextRun};
+    let run = |text: &str, hidden: bool| TextRun {
+        text: text.into(),
+        bbox: Rect::new(50.0, 700.0, 150.0, 712.0),
+        font_size: 10.0,
+        font_name: "F".into(),
+        bold: false,
+        italic: false,
+        color: [0.0; 3],
+        mcid: None,
+        hidden,
+    };
+    let doc = Document {
+        meta: PdfMeta::default(),
+        structure: None,
+        pages: vec![Page {
+            number: 1,
+            media_box: Rect::new(0.0, 0.0, 600.0, 800.0),
+            runs: vec![run("Visible text here", false), run("inject hidden", true)],
+            images: vec![],
+            lines: vec![],
+            image_data: Default::default(),
+        }],
+    };
+    let on = analyze(&doc, &Options { content_safety: true, ..Default::default() });
+    let md_on = render::to_markdown(&on, &RenderOptions::default());
+    assert!(md_on.contains("Visible") && !md_on.contains("hidden"), "hidden dropped: {md_on}");
+
+    let off = analyze(&doc, &Options { content_safety: false, ..Default::default() });
+    let md_off = render::to_markdown(&off, &RenderOptions::default());
+    assert!(md_off.contains("hidden"), "hidden kept when safety off");
+}
+
+#[test]
 fn html_and_text_render_without_panic() {
     let a = analyze_file("lorem.pdf");
     let html = render::to_html(&a);

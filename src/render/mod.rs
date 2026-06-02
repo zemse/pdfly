@@ -9,16 +9,12 @@ pub mod md;
 pub mod split;
 pub mod text;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RenderOptions {
     /// Inserted between pages; `%page-number%` is replaced with the *next* page number.
     pub page_separator: Option<String>,
-}
-
-impl Default for RenderOptions {
-    fn default() -> Self {
-        RenderOptions { page_separator: None }
-    }
+    /// Emit raw HTML `<table>` (with col/row spans) instead of GFM pipe tables.
+    pub html_tables: bool,
 }
 
 pub use html::to_html;

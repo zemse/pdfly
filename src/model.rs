@@ -11,6 +11,8 @@ pub struct Line {
     pub font_size: f64,
     pub bold: bool,
     pub italic: bool,
+    /// A horizontal rule crosses this line's vertical center (strikethrough).
+    pub strike: bool,
 }
 
 /// A list item (possibly with nested children handled flatly for now).

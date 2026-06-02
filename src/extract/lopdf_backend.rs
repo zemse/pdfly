@@ -254,6 +254,7 @@ struct Interp<'a> {
     h_scale: f64, // 1.0 == 100%
     leading: f64,
     rise: f64,
+    render_mode: i64,
     // marked content (tagged PDFs)
     mcid_stack: Vec<Option<i32>>,
     // path
@@ -284,6 +285,7 @@ impl<'a> Interp<'a> {
             h_scale: 1.0,
             leading: 0.0,
             rise: 0.0,
+            render_mode: 0,
             mcid_stack: Vec::new(),
             cur: (0.0, 0.0),
             subpath_start: (0.0, 0.0),
@@ -342,6 +344,7 @@ impl<'a> Interp<'a> {
                 "Tz" => self.h_scale = num(a, 0).unwrap_or(100.0) / 100.0,
                 "TL" => self.leading = num(a, 0).unwrap_or(0.0),
                 "Ts" => self.rise = num(a, 0).unwrap_or(0.0),
+                "Tr" => self.render_mode = num(a, 0).unwrap_or(0.0) as i64,
                 "Tf" => self.set_font(a),
                 "Tj" => {
                     if let Some(Object::String(bytes, _)) = a.first() {
@@ -544,6 +547,7 @@ impl<'a> Interp<'a> {
             italic: font.italic,
             color: self.fill_color,
             mcid: self.mcid_stack.iter().rev().find_map(|m| *m),
+            hidden: self.render_mode == 3 || self.render_mode == 7,
         });
     }
 

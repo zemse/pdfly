@@ -120,6 +120,7 @@ fn build_one_line(runs: &[TextRun], g: &[usize], lines: &mut Vec<Line>) {
         font_size,
         bold: total_chars > 0 && bold_chars * 2 > total_chars,
         italic: total_chars > 0 && italic_chars * 2 > total_chars,
+        strike: false,
     });
 }
 

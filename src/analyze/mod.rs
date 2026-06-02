@@ -27,6 +27,8 @@ pub struct Options {
     pub threads: usize,
     /// Use the PDF's own structure tree (tagged PDFs) instead of heuristics.
     pub use_struct_tree: bool,
+    /// Detect strikethrough (horizontal rule through text) -> `~~`.
+    pub detect_strikethrough: bool,
 }
 
 impl Default for Options {
@@ -37,6 +39,7 @@ impl Default for Options {
             sanitize: false,
             threads: 1,
             use_struct_tree: false,
+            detect_strikethrough: false,
         }
     }
 }
@@ -86,6 +89,10 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
             .filter(|(li, _)| !drop_set.contains(&(pi, *li)))
             .map(|(_, l)| l.clone())
             .collect();
+
+        if opts.detect_strikethrough {
+            mark_strikes(&mut text_lines, &page.lines);
+        }
 
         // Tables consume the lines that fall inside them.
         let (detected, consumed) = tables::detect(&page.lines, &text_lines);
@@ -188,6 +195,10 @@ fn filter_runs(runs: &[TextRun], media: Rect, content_safety: bool) -> Vec<TextR
     let margin = 2.0;
     runs.iter()
         .filter(|r| {
+            // declared-invisible text (render mode 3/7) — AI-safety
+            if r.hidden {
+                return false;
+            }
             // tiny text
             if r.font_size < 1.5 || r.bbox.height() < 1.0 {
                 return false;
@@ -343,7 +354,7 @@ fn classify_block(
         }
 
         // Paragraph: merge following non-heading, non-list lines with small gaps.
-        let mut text = line.text.trim_end().to_string();
+        let mut text = line_text(line);
         let mut bbox = line.bbox;
         let mut j = i + 1;
         while j < lines.len() {
@@ -362,7 +373,7 @@ fn classify_block(
             if !text.ends_with(' ') {
                 text.push(' ');
             }
-            text.push_str(next.text.trim());
+            text.push_str(&line_text(next));
             bbox.union(&next.bbox);
             j += 1;
         }
@@ -437,6 +448,39 @@ fn strip_marker(text: &str) -> String {
 
 fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Mark lines crossed near their vertical center by a horizontal rule.
+fn mark_strikes(lines: &mut [Line], segs: &[crate::extract::LineSeg]) {
+    for line in lines.iter_mut() {
+        let cy = line.bbox.center_y();
+        let h = line.bbox.height().max(line.font_size).max(1.0);
+        for s in segs {
+            if !s.is_horizontal() {
+                continue;
+            }
+            let sy = (s.y0 + s.y1) / 2.0;
+            if (sy - cy).abs() > h * 0.35 {
+                continue; // not through the middle (avoids underlines)
+            }
+            let (lo, hi) = (s.x0.min(s.x1), s.x0.max(s.x1));
+            let overlap = hi.min(line.bbox.right) - lo.max(line.bbox.left);
+            if overlap > line.bbox.width() * 0.6 {
+                line.strike = true;
+                break;
+            }
+        }
+    }
+}
+
+/// Trimmed line text, wrapped in `~~` when struck.
+fn line_text(l: &Line) -> String {
+    let t = l.text.trim();
+    if l.strike {
+        format!("~~{}~~", t)
+    } else {
+        t.to_string()
+    }
 }
 
 /// Find a caption-like paragraph adjacent to an image bbox.

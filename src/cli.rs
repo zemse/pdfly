@@ -79,6 +79,14 @@ pub struct Cli {
     #[arg(long)]
     pub annotate: bool,
 
+    /// Detect strikethrough text and wrap it in ~~ (Markdown).
+    #[arg(long)]
+    pub detect_strikethrough: bool,
+
+    /// Emit raw HTML <table> (with col/row spans) inside Markdown for complex tables.
+    #[arg(long)]
+    pub markdown_with_html: bool,
+
     /// Write the single requested format to stdout instead of files.
     #[arg(long)]
     pub to_stdout: bool,
