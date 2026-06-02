@@ -95,6 +95,15 @@ pub struct ImageObj {
     pub name: String,
 }
 
+/// Decoded image data ready to persist.
+#[derive(Clone, Debug)]
+pub enum ImageData {
+    /// JPEG bytes (DCTDecode passthrough).
+    Jpeg(Vec<u8>),
+    /// Raw RGBA8 pixels.
+    Rgba { width: u32, height: u32, data: Vec<u8> },
+}
+
 /// An axis-aligned vector line segment (for table borders / strikethrough).
 #[derive(Clone, Copy, Debug)]
 pub struct LineSeg {
@@ -120,6 +129,8 @@ pub struct Page {
     pub runs: Vec<TextRun>,
     pub images: Vec<ImageObj>,
     pub lines: Vec<LineSeg>,
+    /// Decoded image XObjects on this page, keyed by resource name.
+    pub image_data: std::collections::HashMap<String, ImageData>,
 }
 
 #[derive(Clone, Debug, Default)]

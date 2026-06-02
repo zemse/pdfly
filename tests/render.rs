@@ -57,6 +57,25 @@ fn book_chapter_splits_into_multiple_files() {
 }
 
 #[test]
+fn images_extract_to_files() {
+    use pdf_rs::render::images::{process_images, ImageMode};
+    let doc = LopdfBackend::load(
+        &corpus("pdfua-1-reference-suite-1-1/PDFUA-Ref-2-01_Magazine-danish.pdf"),
+        None,
+        None,
+    )
+    .unwrap();
+    let mut a = analyze(&doc, &Options::default());
+    let tmp = std::env::temp_dir().join("pdfrs_img_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let n = process_images(&doc, &mut a, ImageMode::External, "png", &tmp, &tmp, "mag").unwrap();
+    assert!(n > 0, "expected images extracted");
+    let files: Vec<_> = std::fs::read_dir(&tmp).unwrap().flatten().collect();
+    assert!(!files.is_empty(), "image files written");
+}
+
+#[test]
 fn html_and_text_render_without_panic() {
     let a = analyze_file("lorem.pdf");
     let html = render::to_html(&a);

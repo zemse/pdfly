@@ -1,7 +1,9 @@
 //! Renderers: [`AnalyzedDoc`] -> Markdown / text / HTML / JSON, plus
 //! chapter-wise Markdown splitting.
 
+pub mod annotate;
 pub mod html;
+pub mod images;
 pub mod json;
 pub mod md;
 pub mod split;

@@ -53,7 +53,7 @@ fn process_one(
 ) -> Result<()> {
     let doc = LopdfBackend::load(file, cli.password.as_deref(), pages)
         .with_context(|| format!("extracting {}", file.display()))?;
-    let analyzed = analyze::analyze(
+    let mut analyzed = analyze::analyze(
         &doc,
         &Options {
             include_header_footer: cli.include_header_footer,
@@ -69,6 +69,37 @@ fn process_one(
         file.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
     });
     let base = file.file_stem().and_then(|s| s.to_str()).unwrap_or("output").to_string();
+
+    // Resolve images (write files / embed / drop) before rendering.
+    if !cli.to_stdout {
+        let mode = render::images::parse_mode(&cli.image_output);
+        let image_dir = cli
+            .image_dir
+            .clone()
+            .unwrap_or_else(|| out_dir.join(format!("{base}_images")));
+        std::fs::create_dir_all(&out_dir).ok();
+        let n = render::images::process_images(
+            &doc, &mut analyzed, mode, &cli.image_format, &out_dir, &image_dir, &base,
+        )
+        .unwrap_or(0);
+        if n > 0 && !cli.quiet {
+            eprintln!("  extracted {n} image(s)");
+        }
+    } else {
+        // stdout: drop images (can't reference files).
+        analyzed.elements.retain(|e| !matches!(e, crate::model::Element::Image { .. }));
+    }
+
+    // Annotated debug PDF.
+    if cli.annotate {
+        std::fs::create_dir_all(&out_dir).ok();
+        let path = out_dir.join(format!("{base}.annotated.pdf"));
+        match crate::render::annotate::write_annotated(file, cli.password.as_deref(), &analyzed, &path) {
+            Ok(()) if !cli.quiet => eprintln!("  wrote {}", path.display()),
+            Err(e) => eprintln!("  annotate failed: {e:#}"),
+            _ => {}
+        }
+    }
 
     // Chapter split (Markdown only) takes a dedicated directory.
     if cli.split {

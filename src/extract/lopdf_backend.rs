@@ -49,6 +49,7 @@ impl super::PdfBackend for LopdfBackend {
                         runs: vec![],
                         images: vec![],
                         lines: vec![],
+                        image_data: HashMap::new(),
                     });
                 }
             }
@@ -216,7 +217,7 @@ fn decode_pdf_text(bytes: &[u8]) -> String {
 fn extract_page(doc: &Document, number: usize, page_id: ObjectId) -> Result<Page> {
     let media_box = page_media_box(doc, page_id);
     let fonts = page_fonts(doc, page_id);
-    let xobjects = page_xobject_names(doc, page_id);
+    let (xobjects, image_data) = page_images(doc, page_id);
 
     let content_data = doc.get_page_content(page_id).context("get_page_content")?;
     let content = Content::decode(&content_data).context("decode content stream")?;
@@ -230,6 +231,7 @@ fn extract_page(doc: &Document, number: usize, page_id: ObjectId) -> Result<Page
         runs: interp.runs,
         images: interp.images,
         lines: interp.lines,
+        image_data,
     })
 }
 
@@ -668,18 +670,123 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> HashMap<String, Font> {
     map
 }
 
-fn page_xobject_names(doc: &Document, page_id: ObjectId) -> HashMap<String, ()> {
-    let mut map = HashMap::new();
-    let Some(res) = page_resources(doc, page_id) else { return map };
+fn page_images(
+    doc: &Document,
+    page_id: ObjectId,
+) -> (HashMap<String, ()>, HashMap<String, super::ImageData>) {
+    let mut names = HashMap::new();
+    let mut data = HashMap::new();
+    let Some(res) = page_resources(doc, page_id) else { return (names, data) };
     if let Some(xo) = res.get(b"XObject").ok().and_then(|o| as_dict_owned(doc, o)) {
         for (name, val) in xo.iter() {
-            // Only keep image subtypes.
             if let Ok(Object::Stream(s)) = resolve(doc, val) {
                 if subtype_is(&s.dict, "Image") {
-                    map.insert(String::from_utf8_lossy(name).into_owned(), ());
+                    let key = String::from_utf8_lossy(name).into_owned();
+                    names.insert(key.clone(), ());
+                    if let Some(img) = decode_image(doc, s) {
+                        data.insert(key, img);
+                    }
                 }
             }
         }
     }
-    map
+    (names, data)
+}
+
+/// Decode an image XObject to JPEG (DCT passthrough) or raw RGBA.
+fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<super::ImageData> {
+    let dict = &stream.dict;
+    let filters = image_filters(dict);
+    let is_dct = filters.iter().any(|f| f == "DCTDecode");
+
+    if is_dct {
+        // The stream content is already a JPEG.
+        return Some(super::ImageData::Jpeg(stream.content.clone()));
+    }
+
+    // Raw samples (Flate/none): reconstruct from colorspace, 8-bit only.
+    let width = dict.get(b"Width").ok().and_then(super::fonts::fnum)? as u32;
+    let height = dict.get(b"Height").ok().and_then(super::fonts::fnum)? as u32;
+    let bpc = dict.get(b"BitsPerComponent").ok().and_then(super::fonts::fnum).unwrap_or(8.0) as u32;
+    if bpc != 8 || width == 0 || height == 0 || width > 20000 || height > 20000 {
+        return None;
+    }
+    let mut s = stream.clone();
+    let _ = s.decompress();
+    let bytes = &s.content;
+    let cs = color_space_name(doc, dict);
+    let px = (width as usize) * (height as usize);
+    let mut rgba = Vec::with_capacity(px * 4);
+    match cs.as_deref() {
+        Some("DeviceGray") | Some("CalGray") | Some("G") => {
+            if bytes.len() < px {
+                return None;
+            }
+            for &g in &bytes[..px] {
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        Some("DeviceRGB") | Some("CalRGB") | Some("RGB") => {
+            if bytes.len() < px * 3 {
+                return None;
+            }
+            for c in bytes[..px * 3].chunks(3) {
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        Some("DeviceCMYK") | Some("CMYK") => {
+            if bytes.len() < px * 4 {
+                return None;
+            }
+            for c in bytes[..px * 4].chunks(4) {
+                let (cy, m, ye, k) = (c[0] as f64, c[1] as f64, c[2] as f64, c[3] as f64);
+                let r = (255.0 - cy) * (255.0 - k) / 255.0;
+                let g = (255.0 - m) * (255.0 - k) / 255.0;
+                let b = (255.0 - ye) * (255.0 - k) / 255.0;
+                rgba.extend_from_slice(&[r as u8, g as u8, b as u8, 255]);
+            }
+        }
+        _ => return None, // Indexed / ICCBased / unsupported
+    }
+    Some(super::ImageData::Rgba { width, height, data: rgba })
+}
+
+fn image_filters(dict: &Dictionary) -> Vec<String> {
+    match dict.get(b"Filter") {
+        Ok(Object::Name(n)) => vec![String::from_utf8_lossy(n).into_owned()],
+        Ok(Object::Array(a)) => a
+            .iter()
+            .filter_map(|o| if let Object::Name(n) = o { Some(String::from_utf8_lossy(n).into_owned()) } else { None })
+            .collect(),
+        _ => vec![],
+    }
+}
+
+fn color_space_name(doc: &Document, dict: &Dictionary) -> Option<String> {
+    let cs = dict.get(b"ColorSpace").or_else(|_| dict.get(b"CS")).ok()?;
+    match resolve(doc, cs).ok()? {
+        Object::Name(n) => Some(String::from_utf8_lossy(n).into_owned()),
+        Object::Array(a) => {
+            // e.g. [/ICCBased stream] -> peek /N; [/Indexed base ...] unsupported here
+            if let Some(Object::Name(n)) = a.first() {
+                let head = String::from_utf8_lossy(n).into_owned();
+                if head == "ICCBased" {
+                    if let Some(Object::Reference(id)) = a.get(1) {
+                        if let Ok(s) = doc.get_object(*id).and_then(|o| o.as_stream()) {
+                            let n = s.dict.get(b"N").ok().and_then(super::fonts::fnum).unwrap_or(3.0);
+                            return Some(match n as i64 {
+                                1 => "DeviceGray".into(),
+                                4 => "DeviceCMYK".into(),
+                                _ => "DeviceRGB".into(),
+                            });
+                        }
+                    }
+                    return Some("DeviceRGB".into());
+                }
+                return Some(head);
+            }
+            None
+        }
+        _ => None,
+    }
 }

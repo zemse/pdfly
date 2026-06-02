@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 lopdf = "0.40.0"
 rayon = "1.12.0"
 regex = "1.12.3"

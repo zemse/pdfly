@@ -63,6 +63,22 @@ pub struct Cli {
     #[arg(long)]
     pub use_struct_tree: bool,
 
+    /// Image handling: off (omit), embedded (base64 data URI), external (files).
+    #[arg(long, default_value = "external")]
+    pub image_output: String,
+
+    /// Format for extracted raster images.
+    #[arg(long, default_value = "png", value_parser = ["png", "jpeg"])]
+    pub image_format: String,
+
+    /// Directory for extracted images (default: <output-dir>/<name>_images).
+    #[arg(long)]
+    pub image_dir: Option<std::path::PathBuf>,
+
+    /// Write an annotated debug PDF with a box drawn around each detected element.
+    #[arg(long)]
+    pub annotate: bool,
+
     /// Write the single requested format to stdout instead of files.
     #[arg(long)]
     pub to_stdout: bool,

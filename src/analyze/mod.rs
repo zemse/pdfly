@@ -149,11 +149,20 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
         }
         flush(&mut pending_lines, &mut page_elements, &mut heading_sizes);
 
-        // Images as standalone elements.
+        // Images as standalone elements, with caption association: a short,
+        // caption-like paragraph just below/above the image becomes its alt
+        // text and is removed from the flow.
         for img in &page.images {
+            let mut alt = String::new();
+            if let Some(idx) = find_caption(&page_elements, &img.bbox) {
+                if let Element::Paragraph { text, .. } = &page_elements[idx] {
+                    alt = text.clone();
+                }
+                page_elements.remove(idx);
+            }
             page_elements.push(Element::Image {
                 name: img.name.clone(),
-                alt: String::new(),
+                alt,
                 bbox: img.bbox,
                 page: page_no,
             });
@@ -428,4 +437,32 @@ fn strip_marker(text: &str) -> String {
 
 fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Find a caption-like paragraph adjacent to an image bbox.
+fn find_caption(elements: &[Element], img: &Rect) -> Option<usize> {
+    let img_h = img.height().max(1.0);
+    for (i, el) in elements.iter().enumerate() {
+        if let Element::Paragraph { text, bbox, .. } = el {
+            let chars = text.chars().count();
+            if chars == 0 || chars > 160 {
+                continue;
+            }
+            // horizontally overlapping
+            let overlap = bbox.left.max(img.left) < bbox.right.min(img.right);
+            if !overlap {
+                continue;
+            }
+            let below = (img.bottom - bbox.top).abs() < img_h * 0.8 && bbox.top <= img.bottom + 2.0;
+            let above = (bbox.bottom - img.top).abs() < img_h * 0.8 && bbox.bottom >= img.top - 2.0;
+            let caption_word = {
+                let l = text.to_lowercase();
+                l.starts_with("fig") || l.starts_with("table") || l.starts_with("image") || l.starts_with("photo")
+            };
+            if (below || above) && (caption_word || chars <= 90) {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
