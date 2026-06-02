@@ -284,28 +284,43 @@ fn classify_block(
         // List item?
         if let Some((ordered, _marker)) = list_marker(&line.text) {
             // Gather consecutive list items.
-            let mut items = Vec::new();
+            let mut raw: Vec<(String, Rect, bool)> = Vec::new();
             let mut bbox = Rect::empty();
             let mut ord = ordered;
             while i < lines.len() {
                 if let Some((o2, _)) = list_marker(&lines[i].text) {
                     let txt = strip_marker(&lines[i].text);
                     bbox.union(&lines[i].bbox);
-                    items.push(ListItem { text: txt, bbox: lines[i].bbox });
+                    raw.push((txt, lines[i].bbox, o2));
                     ord = ord || o2;
                     i += 1;
                 } else {
                     break;
                 }
             }
+            // Infer nesting depth from left indentation (relative to min left).
+            let min_left = raw.iter().map(|(_, b, _)| b.left).fold(f64::MAX, f64::min);
+            let items: Vec<ListItem> = raw
+                .into_iter()
+                .map(|(text, b, _)| {
+                    let indent = (b.left - min_left).max(0.0);
+                    let level = (indent / 18.0).round() as usize; // ~1 level per 18pt
+                    ListItem { text, bbox: b, level: level.min(5) }
+                })
+                .collect();
             out.push(Element::List { ordered: ord, items, bbox, page });
             continue;
         }
 
-        // Heading? Larger-than-body font, or bold + short, standing relatively alone.
+        // Heading? Larger-than-body font, or bold + short. Guard against bold
+        // running text: a bold line only counts as a heading if it's short and
+        // doesn't read like a sentence (no terminal period, not too long).
+        let chars = line.text.chars().count();
+        let trimmed = line.text.trim();
         let is_larger = line.font_size >= body_size * 1.15;
-        let is_bold_short = line.bold && line.text.chars().count() <= 80;
-        if (is_larger || is_bold_short) && !line.text.trim().is_empty() {
+        let sentence_like = chars > 60 || trimmed.ends_with('.') || trimmed.ends_with(';');
+        let is_bold_short = line.bold && line.font_size >= body_size * 0.95 && chars <= 60 && !sentence_like;
+        if (is_larger || is_bold_short) && !trimmed.is_empty() {
             heading_sizes.push(line.font_size);
             out.push(Element::Heading {
                 level: 0, // filled in globally

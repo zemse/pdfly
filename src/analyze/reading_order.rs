@@ -4,7 +4,11 @@
 
 use crate::extract::Rect;
 
-const BETA: f64 = 2.0;
+/// A line is "cross-layout" (spans columns: title, abstract, full-width header)
+/// if it is at least this fraction of the widest element AND overlaps >= 2
+/// others. Such lines are set aside and re-inserted by vertical position so
+/// the two-column body underneath can be cut cleanly.
+const BETA: f64 = 0.65;
 const DENSITY_THRESHOLD: f64 = 0.9;
 const OVERLAP_THRESHOLD: f64 = 0.1;
 const MIN_OVERLAP_COUNT: usize = 2;

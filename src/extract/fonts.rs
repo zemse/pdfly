@@ -22,6 +22,9 @@ pub struct Font {
     to_unicode: Option<HashMap<u32, String>>,
     /// Simple-font byte -> char from base encoding + Differences.
     encoding: Option<HashMap<u8, char>>,
+    /// CID/GID -> unicode recovered from an embedded font program (when there
+    /// is no `/ToUnicode`). Used for Type0/Identity fonts.
+    cid_unicode: Option<HashMap<u32, char>>,
     /// code/cid -> width in 1000-unit glyph space.
     widths: HashMap<u32, f64>,
     default_width: f64,
@@ -36,6 +39,7 @@ impl Default for Font {
             two_byte: false,
             to_unicode: None,
             encoding: None,
+            cid_unicode: None,
             widths: HashMap::new(),
             default_width: 500.0,
         }
@@ -61,12 +65,10 @@ impl Font {
 
         for &code in &codes {
             // text
-            if let Some(tu) = &self.to_unicode {
-                if let Some(s) = tu.get(&code) {
-                    text.push_str(s);
-                } else {
-                    self.push_via_encoding(code, &mut text);
-                }
+            if let Some(s) = self.to_unicode.as_ref().and_then(|tu| tu.get(&code)) {
+                text.push_str(s);
+            } else if let Some(&ch) = self.cid_unicode.as_ref().and_then(|m| m.get(&code)) {
+                text.push(ch);
             } else {
                 self.push_via_encoding(code, &mut text);
             }
@@ -138,6 +140,15 @@ pub fn build_font(doc: &Document, font_dict: &Dictionary) -> Font {
                 }
             }
             apply_descriptor_flags(doc, &desc, &mut font);
+            if font.to_unicode.is_none() {
+                if let Some(prog) = descriptor_font_program(doc, &desc) {
+                    if let Some(emb) = load_embedded(&prog) {
+                        if !emb.gid_to_unicode.is_empty() {
+                            font.cid_unicode = Some(emb.gid_to_unicode);
+                        }
+                    }
+                }
+            }
         }
     } else {
         // Simple font: byte codes.
@@ -152,15 +163,95 @@ pub fn build_font(doc: &Document, font_dict: &Dictionary) -> Font {
                 }
             }
         }
-        font.encoding = Some(build_simple_encoding(doc, font_dict));
+        let mut enc = build_simple_encoding(doc, font_dict);
         if let Ok(fd) = font_dict.get(b"FontDescriptor") {
             if let Ok(fd) = resolve(doc, fd).and_then(|o| o.as_dict().map(|d| d.clone())) {
                 apply_descriptor_flags_dict(&fd, &mut font);
+                // Recover code->unicode from the embedded program when there is
+                // no ToUnicode and no explicit Differences for those codes.
+                if font.to_unicode.is_none() {
+                    if let Some(prog) = font_program(doc, &fd) {
+                        if let Some(emb) = load_embedded(&prog) {
+                            for (code, ch) in emb.code_to_unicode {
+                                enc.entry(code).or_insert(ch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        font.encoding = Some(enc);
+    }
+
+    font
+}
+
+/// Embedded-font maps recovered via ttf-parser (TrueType / OpenType-CFF).
+struct Embedded {
+    gid_to_unicode: HashMap<u32, char>,
+    code_to_unicode: HashMap<u8, char>,
+}
+
+fn descriptor_font_program(doc: &Document, descendant: &Dictionary) -> Option<Vec<u8>> {
+    let fd = descendant.get(b"FontDescriptor").ok()?;
+    let fd = resolve(doc, fd).ok()?.as_dict().ok()?.clone();
+    font_program(doc, &fd)
+}
+
+fn font_program(doc: &Document, descriptor: &Dictionary) -> Option<Vec<u8>> {
+    for key in [b"FontFile2".as_slice(), b"FontFile3".as_slice()] {
+        if let Ok(r) = descriptor.get(key) {
+            if let Some(data) = resolve_stream(doc, r) {
+                return Some(data);
+            }
+        }
+    }
+    None
+}
+
+fn load_embedded(bytes: &[u8]) -> Option<Embedded> {
+    let face = ttf_parser::Face::parse(bytes, 0).ok()?;
+    let mut gid_to_unicode: HashMap<u32, char> = HashMap::new();
+    let cmap = face.tables().cmap?;
+
+    // Reverse map gid -> unicode from any Unicode subtable.
+    for sub in cmap.subtables {
+        if sub.is_unicode() {
+            sub.codepoints(|cp| {
+                if let Some(gid) = sub.glyph_index(cp) {
+                    if let Some(ch) = char::from_u32(cp) {
+                        gid_to_unicode.entry(gid.0 as u32).or_insert(ch);
+                    }
+                }
+            });
+        }
+    }
+    // Glyph-name fallback (post table -> AGL) for gids still unmapped.
+    let num = face.number_of_glyphs();
+    for gid in 0..num {
+        if let std::collections::hash_map::Entry::Vacant(e) = gid_to_unicode.entry(gid as u32) {
+            if let Some(name) = face.glyph_name(ttf_parser::GlyphId(gid)) {
+                if let Some(ch) = glyph_name_to_char(name) {
+                    e.insert(ch);
+                }
             }
         }
     }
 
-    font
+    // Simple-font code -> unicode via a builtin (symbol/mac) subtable.
+    let mut code_to_unicode: HashMap<u8, char> = HashMap::new();
+    for sub in cmap.subtables {
+        for code in 0u32..=255 {
+            let gid = sub.glyph_index(code).or_else(|| sub.glyph_index(0xF000 + code));
+            if let Some(gid) = gid {
+                if let Some(&ch) = gid_to_unicode.get(&(gid.0 as u32)) {
+                    code_to_unicode.entry(code as u8).or_insert(ch);
+                }
+            }
+        }
+    }
+
+    Some(Embedded { gid_to_unicode, code_to_unicode })
 }
 
 fn apply_descriptor_flags(doc: &Document, desc: &Dictionary, font: &mut Font) {

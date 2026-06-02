@@ -49,9 +49,18 @@ fn render_one(el: &Element, out: &mut String) {
             out.push('\n');
         }
         Element::List { ordered, items, .. } => {
-            for (i, item) in items.iter().enumerate() {
+            let mut counters = [0usize; 8];
+            for item in items {
+                let lvl = item.level.min(7);
+                for c in counters.iter_mut().skip(lvl + 1) {
+                    *c = 0; // reset deeper counters
+                }
+                for _ in 0..lvl {
+                    out.push_str("  ");
+                }
                 if *ordered {
-                    out.push_str(&format!("{}. ", i + 1));
+                    counters[lvl] += 1;
+                    out.push_str(&format!("{}. ", counters[lvl]));
                 } else {
                     out.push_str("- ");
                 }

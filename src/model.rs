@@ -18,6 +18,8 @@ pub struct Line {
 pub struct ListItem {
     pub text: String,
     pub bbox: Rect,
+    /// Nesting depth (0 = top level), inferred from left indentation.
+    pub level: usize,
 }
 
 /// A table cell.

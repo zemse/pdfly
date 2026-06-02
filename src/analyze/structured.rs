@@ -136,7 +136,7 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                         if page == 0 {
                             page = p;
                         }
-                        items.push(ListItem { text, bbox: b });
+                        items.push(ListItem { text, bbox: b, level: 0 });
                     }
                 }
             }
