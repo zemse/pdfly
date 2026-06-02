@@ -84,10 +84,13 @@ fn markdown_html_table_mode() {
         num_pages: 1,
         elements: vec![Element::Table {
             rows: vec![
-                vec![Cell { text: "A".into(), col_span: 2, row_span: 1 }],
                 vec![
-                    Cell { text: "b".into(), col_span: 1, row_span: 1 },
-                    Cell { text: "c".into(), col_span: 1, row_span: 1 },
+                    Cell { text: "A".into(), col_span: 2, row_span: 1, covered: false },
+                    Cell { text: String::new(), col_span: 1, row_span: 1, covered: true },
+                ],
+                vec![
+                    Cell { text: "b".into(), col_span: 1, row_span: 1, covered: false },
+                    Cell { text: "c".into(), col_span: 1, row_span: 1, covered: false },
                 ],
             ],
             bbox: Rect::new(0.0, 0.0, 10.0, 10.0),

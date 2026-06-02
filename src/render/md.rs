@@ -125,6 +125,9 @@ fn render_table_html(rows: &[Vec<Cell>], out: &mut String) {
         out.push_str("  <tr>\n");
         let tag = if r == 0 { "th" } else { "td" };
         for cell in row {
+            if cell.covered {
+                continue;
+            }
             let mut attrs = String::new();
             if cell.col_span > 1 {
                 attrs.push_str(&format!(" colspan=\"{}\"", cell.col_span));

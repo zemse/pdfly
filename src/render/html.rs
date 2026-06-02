@@ -40,7 +40,17 @@ fn render_table(rows: &[Vec<Cell>], out: &mut String) {
         out.push_str("<tr>\n");
         let tag = if r == 0 { "th" } else { "td" };
         for cell in row {
-            out.push_str(&format!("<{tag}>{}</{tag}>\n", esc(cell.text.trim())));
+            if cell.covered {
+                continue;
+            }
+            let mut attrs = String::new();
+            if cell.col_span > 1 {
+                attrs.push_str(&format!(" colspan=\"{}\"", cell.col_span));
+            }
+            if cell.row_span > 1 {
+                attrs.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
+            }
+            out.push_str(&format!("<{tag}{attrs}>{}</{tag}>\n", esc(cell.text.trim())));
         }
         out.push_str("</tr>\n");
     }

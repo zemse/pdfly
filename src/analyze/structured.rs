@@ -158,7 +158,7 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                         if page == 0 {
                             page = p;
                         }
-                        cells.push(Cell { text, col_span: 1, row_span: 1 });
+                        cells.push(Cell { text, col_span: 1, row_span: 1, covered: false });
                     }
                 }
                 if cells.iter().any(|c| !c.text.trim().is_empty()) {

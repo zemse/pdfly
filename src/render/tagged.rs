@@ -75,7 +75,10 @@ pub fn write_tagged_pdf(
                 for row in rows {
                     let tr_id = doc.new_object_id();
                     let mut cell_refs = Vec::new();
-                    for _ in row {
+                    for cell in row {
+                        if cell.covered {
+                            continue;
+                        }
                         cell_refs.push(child_elem(&mut doc, "TD", tr_id, pg.clone()));
                     }
                     doc.set_object(

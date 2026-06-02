@@ -30,6 +30,9 @@ pub struct Cell {
     pub text: String,
     pub col_span: usize,
     pub row_span: usize,
+    /// True when this grid position is merged into a master cell above/left;
+    /// span-aware renderers (HTML, tagged PDF) skip it.
+    pub covered: bool,
 }
 
 /// A finished, render-ready semantic element, in reading order.
