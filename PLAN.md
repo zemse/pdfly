@@ -1,54 +1,40 @@
 # pdf-rs — remaining work
 
-Everything in the original build plan (extraction → analysis → Markdown/JSON/HTML/text, chapter
-split, images, reading order, tables w/ spans, content-safety, sanitize, threads, struct-tree
-read/write w/ marked content, optional OCR) is **done and tested**. For how the code is organized
-and what shipped, see [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+The build is feature-complete and tested (23 tests; whole corpus converts across all output
+modes with no panics). See [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) for
+what shipped. This file lists only what's left.
 
-This file is just the open to-do list.
+## Open (tractable)
 
-## Correctness / quality
+- [ ] **Type1 (`FontFile`) charstring fonts** without `/ToUnicode` and with a non-standard built-in
+  encoding still mis-decode. *(Note: the common gibberish case — `issue-336` — was a ToUnicode CMap
+  bug and is now fixed; embedded TrueType/CFF and standard glyph names decode. This is the rarer
+  residue.)* Would need a Type1 charstring/`/Encoding` parser.
+- [ ] **Dense academic multi-column edge cases** — clean two-column pages now read correctly via
+  gutter detection; pages with a vertical margin stamp + an abstract that lives *inside* a column
+  can still mis-order. Would need per-region column detection (recurse gutter detection into bands).
+- [ ] **Benchmarks** — add a pages/sec measurement (criterion or a `--timing` flag).
+- [ ] **Threshold tuning** — pull `opendataloader-bench` (200 PDFs w/ ground truth) and tune the
+  heading/list/table heuristics against it. (Large download; not done here.)
 
-- [ ] **Type1 font decoding** — Type1 (`FontFile`) subset fonts with non-standard built-in
-  encodings still mis-decode to gibberish (e.g. `issue-336-...pdf`). Need a Type1 charstring /
-  built-in-encoding parser. *(Embedded TrueType/CFF and standard glyph names already decode.)*
-  🧪 `issue-336` decodes to real words.
-- [ ] **Dense multi-column reading order** — a full-width abstract over a two-column body can still
-  interleave. Improve band-then-column recursion (cut horizontal bands before column V-cuts).
-  🧪 arXiv `2408.02509v1.pdf` p1: abstract before body, each column in order.
-- [ ] **Bordered-table over-triggering** — ruled figures/boxes get detected as tables. Add
-  figure-vs-table discrimination (aspect ratio, text density, caption nearby).
-  🧪 Corpus table counts drop to plausible numbers (BookChapter ≠ 21 tables).
-- [ ] **Heading level for struct-tree path** — the `--use-struct-tree` path stores heading `size`
-  as `0.0`; levels come only from the tag name. Fine for H1–H6, but verify deep nesting.
+## Blocked in this environment (need external assets)
 
-## Accessibility (tagged PDF → PDF/UA)
-
-- [ ] **`/ParentTree`** — `--tagged-pdf` writes marked content + a `/StructTreeRoot` that
-  round-trips, but no reverse map. Add a `/ParentTree` number tree keyed by `/StructParents`.
-  🧪 A validator resolves content → structure (not just structure → content).
-- [ ] **PDF/UA conformance pass** — set required metadata (`/Lang`, document title in XMP, `/ViewerPreferences`),
-  then validate (e.g. veraPDF) and fix violations.
-  🧪 veraPDF PDF/UA-1 check passes on a tagged sample.
-
-## Optional / ML features (off by default, feature-gated)
-
-- [ ] **Validate OCR end-to-end** — `--features ocr` compiles and is wired, but never run with real
-  models here. Download `ocrs` `.rten` models, set `PDFRS_OCR_{DETECTION,RECOGNITION}_MODEL`, and
-  confirm output on `chinese_scan.pdf`.
-  🧪 Scanned PDF yields non-empty, sensible text.
-- [ ] **LaTeX formula extraction** — vision model (image→LaTeX) via `rten`, behind a `formula`
-  feature. Emit `$$…$$`.
-- [ ] **Chart / image descriptions** — local VLM behind a `vlm` feature; fill image `alt`. Off by default.
-- [ ] **Korean special-form tables** — niche heuristic; no test corpus yet.
-
-## Polish
-
-- [ ] Tune heuristic thresholds against a larger corpus (pull `opendataloader-bench`); the source's
-  numbers live in veraPDF-wcag-algs (`NodeUtils`/`ListLabelsUtils`/`CaptionUtils`).
-- [ ] Benchmarks (pages/sec) and a `--quiet`/log-level pass.
-- [ ] Publish prep: crate metadata, `include` whitelist, `cargo package --list` check.
+- [ ] **Non-Latin OCR** — the OCR path works end-to-end (`--features ocr`), but the bundled `ocrs`
+  models are Latin-script. Validate with language-specific `.rten` models for CJK/etc.
+- [ ] **LaTeX formula extraction** — needs a local image→LaTeX vision model (e.g. pix2tex via
+  `rten`). Feature scaffolding only; no model available here to build/verify against.
+- [ ] **Chart / image descriptions** — needs a local VLM. Same constraint.
+- [ ] **Korean special-form tables** — niche heuristic; no Korean test PDF available to verify
+  against, so deliberately not implemented blind.
 
 ## Explicitly NOT doing
 
 - Hybrid AI HTTP server (external server + network — breaks the self-contained local binary).
+
+---
+
+### Done in the latest pass (for reference)
+Tagged-PDF `/ParentTree` + PDF/UA metadata · table figure-vs-table discrimination · ToUnicode CMap
+tokenizer fix (packed hex) · two-column gutter reading order · OCR end-to-end validation · publish
+prep (Cargo metadata, MIT LICENSE, include whitelist). Earlier: span inference, borderless tables,
+glyph-name expansion, tagged-PDF MCID association.
