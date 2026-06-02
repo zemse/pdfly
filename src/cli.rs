@@ -87,6 +87,11 @@ pub struct Cli {
     #[arg(long)]
     pub detect_strikethrough: bool,
 
+    /// Table detection method: default (ruled borders) or cluster (also
+    /// detect borderless, column-aligned tables).
+    #[arg(long, default_value = "default", value_parser = ["default", "cluster"])]
+    pub table_method: String,
+
     /// Emit raw HTML <table> (with col/row spans) inside Markdown for complex tables.
     #[arg(long)]
     pub markdown_with_html: bool,

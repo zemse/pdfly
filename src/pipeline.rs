@@ -68,6 +68,7 @@ fn process_one(
             threads: cli.threads.max(1),
             use_struct_tree: cli.use_struct_tree,
             detect_strikethrough: cli.detect_strikethrough,
+            cluster_tables: cli.table_method == "cluster",
         },
     );
 

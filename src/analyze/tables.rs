@@ -187,6 +187,35 @@ mod tests {
     }
 
     #[test]
+    fn cluster_detects_aligned_columns() {
+        // Three rows, two columns aligned at x=10 and x=60, no ruling lines.
+        let lines = vec![
+            line("Name", 13.0, 100.0),
+            line("Age", 63.0, 100.0),
+            line("Alice", 13.0, 80.0),
+            line("30", 63.0, 80.0),
+            line("Bob", 13.0, 60.0),
+            line("25", 63.0, 60.0),
+        ];
+        let (tables, consumed) = detect_cluster(&lines);
+        assert_eq!(tables.len(), 1, "one borderless table");
+        assert_eq!(tables[0].rows.len(), 3);
+        assert_eq!(tables[0].rows[0].len(), 2);
+        assert_eq!(consumed.len(), 6);
+    }
+
+    #[test]
+    fn cluster_ignores_single_column_prose() {
+        let lines = vec![
+            line("This is a paragraph line one", 10.0, 100.0),
+            line("and a second prose line here", 10.0, 85.0),
+            line("and a third prose line again", 10.0, 70.0),
+        ];
+        let (tables, _) = detect_cluster(&lines);
+        assert!(tables.is_empty(), "single-column prose is not a table");
+    }
+
+    #[test]
     fn colspan_from_missing_divider() {
         // 3 rows x 2 cols. The vertical divider at x=50 is absent in the top
         // band (y 70..100), so the header cell spans both columns; the two
@@ -220,13 +249,103 @@ mod tests {
     }
 }
 
+/// Borderless table detection: find runs of text rows that share aligned
+/// columns (whitespace-separated), without any ruling lines. Conservative —
+/// opt-in via `--table-method cluster`. Returns tables + consumed line indices.
+pub fn detect_cluster(text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
+    // Group line indices into rows by baseline.
+    let mut idx: Vec<usize> = (0..text_lines.len()).collect();
+    idx.sort_by(|&a, &b| {
+        text_lines[b].bbox.center_y().partial_cmp(&text_lines[a].bbox.center_y()).unwrap()
+    });
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut cur: Vec<usize> = Vec::new();
+    let mut cur_y = f64::NAN;
+    for &i in &idx {
+        let cy = text_lines[i].bbox.center_y();
+        let tol = (text_lines[i].font_size * 0.6).max(3.0);
+        if cur.is_empty() || (cy - cur_y).abs() <= tol {
+            if cur.is_empty() {
+                cur_y = cy;
+            }
+            cur.push(i);
+        } else {
+            rows.push(std::mem::take(&mut cur));
+            cur.push(i);
+            cur_y = cy;
+        }
+    }
+    if !cur.is_empty() {
+        rows.push(cur);
+    }
+
+    let mut tables = Vec::new();
+    let mut consumed = Vec::new();
+
+    // Scan consecutive multi-cell rows into blocks.
+    let mut r = 0;
+    while r < rows.len() {
+        if rows[r].len() < 2 {
+            r += 1;
+            continue;
+        }
+        let mut block = vec![r];
+        let mut j = r + 1;
+        while j < rows.len() && rows[j].len() >= 2 {
+            block.push(j);
+            j += 1;
+        }
+        if block.len() >= 3 {
+            // Column starts = clustered left edges across the block.
+            let mut lefts: Vec<f64> =
+                block.iter().flat_map(|&br| rows[br].iter().map(|&li| text_lines[li].bbox.left)).collect();
+            let cols = cluster_with(&mut lefts, 12.0);
+            if cols.len() >= 2 {
+                let n_cols = cols.len();
+                let mut out_rows: Vec<Vec<Cell>> = Vec::new();
+                let mut bbox = Rect::empty();
+                for &br in &block {
+                    let mut cells: Vec<Cell> =
+                        (0..n_cols).map(|_| Cell { col_span: 1, row_span: 1, ..Default::default() }).collect();
+                    for &li in &rows[br] {
+                        let l = &text_lines[li];
+                        // nearest column by left edge
+                        let ci = cols
+                            .iter()
+                            .enumerate()
+                            .min_by(|a, b| {
+                                (a.1 - l.bbox.left).abs().partial_cmp(&(b.1 - l.bbox.left).abs()).unwrap()
+                            })
+                            .map(|(k, _)| k)
+                            .unwrap_or(0);
+                        if !cells[ci].text.is_empty() {
+                            cells[ci].text.push(' ');
+                        }
+                        cells[ci].text.push_str(l.text.trim());
+                        bbox.union(&l.bbox);
+                        consumed.push(li);
+                    }
+                    out_rows.push(cells);
+                }
+                tables.push(DetectedTable { bbox, rows: out_rows });
+            }
+        }
+        r = j.max(r + 1);
+    }
+    (tables, consumed)
+}
+
 /// Sort + merge near-equal coordinates into representative grid lines.
 fn cluster(vals: &mut [f64]) -> Vec<f64> {
+    cluster_with(vals, TOL)
+}
+
+fn cluster_with(vals: &mut [f64], tol: f64) -> Vec<f64> {
     vals.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mut out: Vec<f64> = Vec::new();
     for &v in vals.iter() {
         match out.last() {
-            Some(&last) if (v - last).abs() <= TOL => {}
+            Some(&last) if (v - last).abs() <= tol => {}
             _ => out.push(v),
         }
     }

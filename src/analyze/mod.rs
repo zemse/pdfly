@@ -29,6 +29,8 @@ pub struct Options {
     pub use_struct_tree: bool,
     /// Detect strikethrough (horizontal rule through text) -> `~~`.
     pub detect_strikethrough: bool,
+    /// Also detect borderless tables from column-aligned text.
+    pub cluster_tables: bool,
 }
 
 impl Default for Options {
@@ -40,6 +42,7 @@ impl Default for Options {
             threads: 1,
             use_struct_tree: false,
             detect_strikethrough: false,
+            cluster_tables: false,
         }
     }
 }
@@ -95,14 +98,29 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
         }
 
         // Tables consume the lines that fall inside them.
-        let (detected, consumed) = tables::detect(&page.lines, &text_lines);
+        let (mut detected, consumed) = tables::detect(&page.lines, &text_lines);
         let consumed: std::collections::HashSet<usize> = consumed.into_iter().collect();
-        let remaining: Vec<Line> = text_lines
+        let mut remaining: Vec<Line> = text_lines
             .drain(..)
             .enumerate()
             .filter(|(i, _)| !consumed.contains(i))
             .map(|(_, l)| l)
             .collect();
+
+        // Optional borderless-table detection on the remaining lines.
+        if opts.cluster_tables {
+            let (ctables, cconsumed) = tables::detect_cluster(&remaining);
+            if !ctables.is_empty() {
+                let cset: std::collections::HashSet<usize> = cconsumed.into_iter().collect();
+                remaining = remaining
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, _)| !cset.contains(i))
+                    .map(|(_, l)| l)
+                    .collect();
+                detected.extend(ctables);
+            }
+        }
 
         // Body font size = length-weighted mode of remaining line sizes.
         let body_size = body_font_size(&remaining);
