@@ -90,6 +90,9 @@ pub fn write_tagged_pdf(
     let root_id = doc.new_object_id();
     let page_ref = |n: usize| -> Option<Object> { pages.get(&(n as u32)).map(|id| Object::Reference(*id)) };
     let mut kids: Vec<Object> = Vec::new();
+    // page -> (mcid -> owning StructElem id), for the /ParentTree reverse map.
+    let mut parent_map: BTreeMap<usize, BTreeMap<i32, ObjectId>> = BTreeMap::new();
+
     for (i, el) in analyzed.elements.iter().enumerate() {
         let Some((pg, mcids)) = elem_mcids.get(&i) else { continue };
         if mcids.is_empty() {
@@ -110,18 +113,62 @@ pub fn write_tagged_pdf(
                 d.set("Alt", Object::string_literal(alt.as_str()));
             }
         }
-        kids.push(Object::Reference(doc.add_object(Object::Dictionary(d))));
+        let sid = doc.add_object(Object::Dictionary(d));
+        kids.push(Object::Reference(sid));
+        let page_slot = parent_map.entry(*pg).or_default();
+        for &m in mcids {
+            page_slot.insert(m, sid);
+        }
     }
+
+    // /ParentTree: number tree keyed by each page's /StructParents value (= page
+    // number), mapping MCID index -> owning StructElem. Enables content->struct.
+    let mut nums: Vec<Object> = Vec::new();
+    for (pg, slot) in &parent_map {
+        let max_mcid = slot.keys().copied().max().unwrap_or(0);
+        let refs: Vec<Object> = (0..=max_mcid)
+            .map(|m| slot.get(&m).map(|id| Object::Reference(*id)).unwrap_or(Object::Null))
+            .collect();
+        nums.push(Object::Integer(*pg as i64));
+        nums.push(Object::Reference(doc.add_object(Object::Array(refs))));
+    }
+    let parent_tree = doc.add_object(Object::Dictionary(dictionary! { "Nums" => Object::Array(nums) }));
+    let next_key = parent_map.keys().copied().max().map(|k| k + 1).unwrap_or(0);
 
     doc.set_object(
         root_id,
-        Object::Dictionary(dictionary! { "Type" => "StructTreeRoot", "K" => Object::Array(kids) }),
+        Object::Dictionary(dictionary! {
+            "Type" => "StructTreeRoot",
+            "K" => Object::Array(kids),
+            "ParentTree" => Object::Reference(parent_tree),
+            "ParentTreeNextKey" => Object::Integer(next_key as i64),
+        }),
     );
 
+    // Catalog: structure tree + PDF/UA metadata.
+    let title = analyzed
+        .meta
+        .title
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| src.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()));
     if let Some(Object::Reference(cid)) = doc.trailer.get(b"Root").ok().cloned() {
         if let Ok(cat) = doc.get_dictionary_mut(cid) {
             cat.set("StructTreeRoot", Object::Reference(root_id));
             cat.set("MarkInfo", dictionary! { "Marked" => true });
+            cat.set("Lang", Object::string_literal("en"));
+            cat.set("ViewerPreferences", dictionary! { "DisplayDocTitle" => true });
+        }
+    }
+    // Ensure a document title exists (PDF/UA needs one shown via DisplayDocTitle).
+    if let Some(t) = &title {
+        if let Ok(Object::Reference(info_id)) = doc.trailer.get(b"Info").cloned() {
+            if let Ok(info) = doc.get_dictionary_mut(info_id) {
+                info.set("Title", Object::string_literal(t.as_str()));
+            }
+        } else {
+            let info = doc.add_object(dictionary! { "Title" => Object::string_literal(t.as_str()) });
+            doc.trailer.set("Info", Object::Reference(info));
         }
     }
 
