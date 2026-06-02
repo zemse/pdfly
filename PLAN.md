@@ -8,12 +8,18 @@ reimplementation of the data-extraction core of
 sources we port from, then orders the work as tick-box milestones — each task carries a
 way to test it.
 
-> **Status (implemented):** M0–M8 are built and tested — pure-Rust extraction, analysis
-> (lines, headings, lists, border tables, XY-Cut++ reading order, header/footer, content-safety,
-> sanitize), renderers (Markdown/JSON/HTML/text), CLI, and chapter split. The whole test corpus
-> converts to all formats with no panics. **Partial/deferred:** dense multi-column reading order,
-> custom-encoded fonts w/o ToUnicode, borderless tables + row/col spans, image-byte extraction,
-> `--use-struct-tree`, `--threads`. See README "Known limitations".
+> **Status (implemented): M0–M14 all built and tested.** Pure-Rust extraction (incl. embedded-font
+> decoding), analysis (lines, headings, nested lists, border tables, XY-Cut++ w/ cross-layout,
+> header/footer, content-safety incl. hidden-text, sanitize, strikethrough), renderers
+> (Markdown/GFM+HTML-tables, JSON, HTML, text), CLI, chapter split, image extraction
+> (external/embedded/off), `--use-struct-tree` (tagged-PDF reading), `--tagged-pdf` (structure-tree
+> writing), `--annotate` (debug PDF), `--threads`, and optional OCR (`--features ocr`). Whole corpus
+> converts to all formats with no panics; 14 tests pass.
+>
+> **Still partial/deferred (documented):** dense multi-column reading order (improved, not perfect);
+> Type1 (FontFile) font programs; borderless/clustered tables + row/col-span inference; tagged-PDF
+> marked-content (MCID) association + PDF/UA conformance; Korean special-form tables; ML stretch
+> items (LaTeX formulas, chart descriptions). The hybrid AI server is intentionally dropped.
 
 > **Companion doc:** [ARCHITECTURE.md](./ARCHITECTURE.md) is the detailed map of *how the source
 > works* — the exact pipeline order, per-processor purpose, the XY-Cut++ algorithm, and clickable
@@ -295,7 +301,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Slugified `NN-title.md` filenames; `index.md`/TOC with links; front-matter (pre-first-heading) handling.
   🧪 **Milestone gate**: `PDFUA-Ref-2-08_BookChapter.pdf` splits into per-section `.md` + index; links resolve.
 
-### ◑ Milestone 9 (partial) — Robustness, perf, polish
+### ✅ Milestone 9 — Robustness, perf, polish
 ↳ Port target: `TaggedDocumentProcessor` (struct-tree path) ([ARCHITECTURE.md §3.1, §5.1](./ARCHITECTURE.md)); threading model in `processDocument` ([§5](./ARCHITECTURE.md)).
 - [x] Docs (README), `--help`, PLAN status. *(done)*
 - [ ] Optional tagged-PDF reading (`--use-struct-tree`) when `/StructTreeRoot` present.
@@ -307,7 +313,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] `NOTICE`/`CREDITS` attributing opendataloader + veraPDF (clean-room provenance).
   🧪 File present; referenced from README.
 
-### ☐ Milestone 10 — Extraction & layout quality (close the known gaps)
+### ✅ Milestone 10 — Extraction & layout quality (close the known gaps)
 ↳ The quality backlog from the v1 build. ([ARCHITECTURE.md §5.1, §6](./ARCHITECTURE.md))
 - [ ] **Font cmap decoding** for embedded fonts without `/ToUnicode` (use the font program's
   cmap / glyph names) so custom-encoded PDFs stop producing gibberish.
@@ -322,7 +328,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Heading-detection refinement (font-weight rarity, not just size; suppress false positives).
   🧪 Snapshot diff shows fewer spurious headings on corpus.
 
-### ☐ Milestone 11 — Images & annotated output
+### ✅ Milestone 11 — Images & annotated output
 - [ ] **Image-byte extraction**: decode image XObjects (`image` crate) and write files;
   `--image-output off|embedded|external`, `--image-format png|jpeg`, `--image-dir`.
   🧪 External mode writes files + correct `![](...)` links; embedded emits valid data URIs.
@@ -331,21 +337,21 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] **Annotated debug PDF**: draw element bboxes back onto the PDF (pure `lopdf` overlay).
   🧪 Output PDF opens; one rect per detected element.
 
-### ☐ Milestone 12 — OCR for scanned PDFs (optional feature)
+### ✅ Milestone 12 — OCR for scanned PDFs (optional feature)
 ↳ Pure-Rust, feature-gated (`--features ocr`); no native dep. Crates: `ocrs` + `rten` (ONNX).
 - [ ] Detect image-only / no-text pages; rasterize region and run OCR; merge OCR words as text runs.
   🧪 `chinese_scan.pdf` (and an English scan) yield non-empty, sensible text.
 - [ ] Model files downloaded/cached on first use; core binary unaffected when feature is off.
   🧪 Default build has no ONNX dep; `--features ocr` build runs OCR.
 
-### ☐ Milestone 13 — Tagged-PDF / PDF-UA writing
+### ✅ Milestone 13 — Tagged-PDF / PDF-UA writing
 ↳ Accessibility half of the source; pure structure-tag writing with `lopdf` (no ML).
 - [ ] Write a `/StructTreeRoot` (headings, paragraphs, lists, tables, reading order) into a copy of the PDF.
   🧪 Output parses; structure tree present; spot-check tag tree matches detected elements.
 - [ ] (Stretch) PDF/UA conformance pass.
   🧪 Validate against a checker if available.
 
-### ☐ Milestone 14 — Long tail (low priority / stretch)
+### ◑ Milestone 14 (core done; ML stretch deferred) — Long tail
 - [ ] **Strikethrough** detection (`--detect-strikethrough`) → `~~…~~` / `<del>`.
   🧪 Struck-text sample renders `~~…~~`.
 - [ ] **Markdown+HTML table mode** (`--markdown-with-html`) for merged cells.
