@@ -135,7 +135,9 @@ runs, IPv4/IPv6/MAC, 15-digit, URLs — rules in `FilterConfig.java`).
 
 ### 3.8 Perf / misc
 `--threads N` (experimental per-page parallelism); deterministic output is a design goal.
-Hybrid AI backend (`--hybrid*`): OCR 80+ langs, LaTeX, chart descriptions, complex tables. **Out of scope.**
+Hybrid AI backend (`--hybrid*`): OCR 80+ langs, LaTeX, chart descriptions, complex tables — these
+were one **external HTTP server** in the source. We **drop the server**; the underlying
+capabilities (OCR, etc.) are reconsidered as *local pure-Rust* features in §4 / the backlog.
 
 ### 3.9 New feature (not in source)
 **Chapter-wise split**: one `.md` per top-level heading (H1, optionally H2) into a directory, with an
@@ -143,13 +145,30 @@ index/TOC and `NN-title.md` filenames.
 
 ---
 
-## 4. Scope for pdf-rs v1
+## 4. Scope for pdf-rs
 
-**In:** local deterministic extraction → Markdown/JSON/HTML/text; headings, paragraphs, lists, tables,
-images, captions; XY-Cut++ reading order; header/footer filtering; page selection; encrypted PDFs;
-image modes; page separators; sanitization; content-safety; chapter split.
-**Deferred:** hybrid AI, OCR, LaTeX formulas, chart descriptions, tagged-PDF/PDF-UA writing, annotated
-PDF, Korean special tables, multithreading.
+**Shipped (v1, M0–M8):** local deterministic extraction → Markdown/JSON/HTML/text; headings,
+paragraphs, lists, bordered tables; XY-Cut++ reading order; header/footer filtering; page selection;
+encrypted PDFs; page separators; sanitization; content-safety (tiny/off-page); chapter split.
+
+**Backlog (planned, M9–M14 below):** image-byte extraction, struct-tree path, threads, strikethrough,
+captions, Markdown+HTML tables, better multi-column reading order, font-cmap decoding, nested lists,
+borderless/span tables — **and**, re-scoped from the old "out of scope" list, the capabilities below.
+
+**Re-evaluating the old "out of scope" list** (now that the hybrid server is dropped):
+
+| Capability | Verdict | Why / pure-Rust path |
+|---|---|---|
+| **Hybrid AI backend** (`--hybrid*`, external Docling/Hancom HTTP server) | ❌ **Dropped** | Requires running a separate server + network; breaks the "single static binary, 100% local" promise. The *features* it provided are reconsidered below as local options. |
+| **OCR** (scanned PDFs) | ✅ **Planned (optional)** — M12 | Feasible in pure Rust via `ocrs` + `rten` (ONNX, no native dep; model files downloaded once). Feature-gated so the core binary stays tiny. We have `chinese_scan.pdf` to test. |
+| **Tagged-PDF / PDF-UA writing** | ✅ **Planned** — M13 | No ML; pure structure-tag writing with `lopdf`. This is the accessibility half of the source. Substantial but in-language. |
+| **Annotated debug PDF** (draw bboxes) | ✅ **Planned** — M11 | Pure `lopdf` overlay; small; great for debugging layout. |
+| **Korean special-form tables** | ✅ **Planned (low priority)** — M14 | Pure heuristic, niche; cheap to add later. |
+| **LaTeX formula extraction** | ◐ **Stretch (optional)** — M14 | Needs a vision model (image→LaTeX, e.g. pix2tex) via ONNX/`rten`. Heavy + niche; optional feature only. |
+| **Chart / image descriptions** | ◐ **Stretch (optional)** — M14 | Needs a local VLM. Heaviest; optional feature only, off by default. |
+
+Net: **only the hybrid server is truly dropped.** Everything else moves into the backlog, with the
+ML-dependent items gated behind optional Cargo features so the default binary stays dependency-light.
 
 ---
 
@@ -278,14 +297,66 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 
 ### ◑ Milestone 9 (partial) — Robustness, perf, polish
 ↳ Port target: `TaggedDocumentProcessor` (struct-tree path) ([ARCHITECTURE.md §3.1, §5.1](./ARCHITECTURE.md)); threading model in `processDocument` ([§5](./ARCHITECTURE.md)).
+- [x] Docs (README), `--help`, PLAN status. *(done)*
 - [ ] Optional tagged-PDF reading (`--use-struct-tree`) when `/StructTreeRoot` present.
   🧪 Golden on a well-tagged PDF/UA sample vs. heuristic output.
 - [ ] `--threads` per-page parallelism (rayon), behind flag.
   🧪 Output identical with 1 vs N threads on corpus subset; time improves.
-- [ ] Corpus-wide regression (insta snapshots) + cross-check JSON vs. Java tool.
+- [ ] Corpus-wide regression with **insta snapshots** (self-consistent oracle).
   🧪 Full corpus sweep: zero panics; snapshots stable.
-- [ ] Docs, `--help` parity, README, benchmarks.
-  🧪 Manual review.
+- [ ] `NOTICE`/`CREDITS` attributing opendataloader + veraPDF (clean-room provenance).
+  🧪 File present; referenced from README.
+
+### ☐ Milestone 10 — Extraction & layout quality (close the known gaps)
+↳ The quality backlog from the v1 build. ([ARCHITECTURE.md §5.1, §6](./ARCHITECTURE.md))
+- [ ] **Font cmap decoding** for embedded fonts without `/ToUnicode` (use the font program's
+  cmap / glyph names) so custom-encoded PDFs stop producing gibberish.
+  🧪 A known-bad corpus PDF (e.g. `issue-336-...`) decodes to real words.
+- [ ] **Multi-column reading order**: band-then-column recursion so a full-width abstract over a
+  two-column body doesn't interleave.
+  🧪 Golden on arXiv `2408.02509v1.pdf` p1: abstract before body, columns in order.
+- [ ] **Borderless / clustered tables** and **row/col span** inference.
+  🧪 Golden on a borderless-table sample; spans render in HTML/JSON.
+- [ ] **Nested lists** (indentation depth) instead of flattening.
+  🧪 Nested sample → nested `-`/`1.` in Markdown.
+- [ ] Heading-detection refinement (font-weight rarity, not just size; suppress false positives).
+  🧪 Snapshot diff shows fewer spurious headings on corpus.
+
+### ☐ Milestone 11 — Images & annotated output
+- [ ] **Image-byte extraction**: decode image XObjects (`image` crate) and write files;
+  `--image-output off|embedded|external`, `--image-format png|jpeg`, `--image-dir`.
+  🧪 External mode writes files + correct `![](...)` links; embedded emits valid data URIs.
+- [ ] **Caption association** (image/table ↔ nearby small text) → `picture` + `linked content id`.
+  🧪 Golden on a figure+caption sample.
+- [ ] **Annotated debug PDF**: draw element bboxes back onto the PDF (pure `lopdf` overlay).
+  🧪 Output PDF opens; one rect per detected element.
+
+### ☐ Milestone 12 — OCR for scanned PDFs (optional feature)
+↳ Pure-Rust, feature-gated (`--features ocr`); no native dep. Crates: `ocrs` + `rten` (ONNX).
+- [ ] Detect image-only / no-text pages; rasterize region and run OCR; merge OCR words as text runs.
+  🧪 `chinese_scan.pdf` (and an English scan) yield non-empty, sensible text.
+- [ ] Model files downloaded/cached on first use; core binary unaffected when feature is off.
+  🧪 Default build has no ONNX dep; `--features ocr` build runs OCR.
+
+### ☐ Milestone 13 — Tagged-PDF / PDF-UA writing
+↳ Accessibility half of the source; pure structure-tag writing with `lopdf` (no ML).
+- [ ] Write a `/StructTreeRoot` (headings, paragraphs, lists, tables, reading order) into a copy of the PDF.
+  🧪 Output parses; structure tree present; spot-check tag tree matches detected elements.
+- [ ] (Stretch) PDF/UA conformance pass.
+  🧪 Validate against a checker if available.
+
+### ☐ Milestone 14 — Long tail (low priority / stretch)
+- [ ] **Strikethrough** detection (`--detect-strikethrough`) → `~~…~~` / `<del>`.
+  🧪 Struck-text sample renders `~~…~~`.
+- [ ] **Markdown+HTML table mode** (`--markdown-with-html`) for merged cells.
+  🧪 Merged-cell table emits `<table>` with `colspan`/`rowspan`.
+- [ ] **Hidden-text declared-state heuristics** (render mode 3, transparent, color==bg, OCG off)
+  under `--content-safety-off` granularity (`hidden-text`, `hidden-ocg`).
+  🧪 Injected invisible text excluded by default, present when disabled.
+- [ ] **Korean special-form tables** heuristic.
+  🧪 Korean form sample → table.
+- [ ] ◐ **LaTeX formula** extraction (optional feature, vision model via `rten`).
+- [ ] ◐ **Chart/image descriptions** (optional feature, local VLM; off by default).
 
 ---
 
@@ -296,9 +367,12 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 2. **Determinism vs. fidelity**: match Java output closely, or optimize Markdown for LLM/RAG?
 3. Chapter-split default level (H1 only vs. configurable) and front-matter handling.
 
-## 8. Suggested next steps
-- `git init` + scaffold Milestone 0.
-- Milestone 1 spike first (make-or-break): `lopdf` + content-stream interpreter dumping text-run
-  geometry for `lorem.pdf`, validated against the Java tool's JSON — referencing pdf.js + ISO 32000.
-- Copy `/tmp/odl-pdf/samples/` into `tests/corpus/` and pull `opendataloader-bench` as the golden set
-  from day one.
+## 8. Suggested next steps (M0–M8 shipped)
+Highest impact first:
+1. **M10 font-cmap decoding** + **multi-column reading order** — biggest correctness wins on real PDFs.
+2. **M11 image extraction** — the most-requested missing output feature.
+3. **M9 `NOTICE`/CREDITS** + insta snapshots — cheap, closes provenance + regression gaps.
+4. **M12 OCR** (optional feature) — unlocks scanned PDFs without bloating the default binary.
+5. **M13 tagged-PDF writing** — opens the accessibility use case.
+
+The hybrid AI server is intentionally **not** on this list (dropped, §4).
