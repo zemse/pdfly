@@ -188,25 +188,35 @@ mod tests {
 
     #[test]
     fn colspan_from_missing_divider() {
-        // 2x2 grid; vertical divider at x=50 only exists in the bottom band,
-        // so the top row is one cell spanning two columns.
+        // 3 rows x 2 cols. The vertical divider at x=50 is absent in the top
+        // band (y 70..100), so the header cell spans both columns; the two
+        // data rows below are normal 2-cell rows (5 filled cells total).
         let segs = vec![
             hline(100.0, 0.0, 100.0),
-            hline(50.0, 0.0, 100.0),
+            hline(70.0, 0.0, 100.0),
+            hline(40.0, 0.0, 100.0),
             hline(0.0, 0.0, 100.0),
             vline(0.0, 0.0, 100.0),
             vline(100.0, 0.0, 100.0),
-            vline(50.0, 0.0, 50.0), // bottom half only
+            vline(50.0, 0.0, 70.0), // present only below the header band
         ];
-        let lines = vec![line("Header", 50.0, 75.0), line("a", 25.0, 25.0), line("b", 75.0, 25.0)];
+        let lines = vec![
+            line("Header", 50.0, 85.0),
+            line("a", 25.0, 55.0),
+            line("b", 75.0, 55.0),
+            line("c", 25.0, 20.0),
+            line("d", 75.0, 20.0),
+        ];
         let (tables, _consumed) = detect(&segs, &lines);
         assert_eq!(tables.len(), 1);
         let rows = &tables[0].rows;
-        assert_eq!(rows[0][0].col_span, 2, "top cell spans both columns");
+        assert_eq!(rows[0][0].col_span, 2, "header spans both columns");
         assert_eq!(rows[0][0].text, "Header");
-        assert!(rows[0][1].covered, "second top cell is covered");
+        assert!(rows[0][1].covered, "second header cell is covered");
         assert_eq!(rows[1][0].text, "a");
         assert_eq!(rows[1][1].text, "b");
+        assert_eq!(rows[2][0].text, "c");
+        assert_eq!(rows[2][1].text, "d");
     }
 }
 
