@@ -495,58 +495,111 @@ fn single_letter_glyph(name: &str) -> Option<char> {
     Some(c)
 }
 
+/// A token from a CMap stream.
+#[derive(Debug, Clone)]
+enum CMapTok {
+    Hex(String),
+    Word(String),
+    ArrayOpen,
+    ArrayClose,
+}
+
+/// Tokenize a CMap: `<..>` hex strings (which may be packed with no spaces),
+/// `[`/`]`, and bare keywords. Robust to missing whitespace between groups.
+fn tokenize_cmap(data: &[u8]) -> Vec<CMapTok> {
+    let s = String::from_utf8_lossy(data);
+    let bytes = s.as_bytes();
+    let mut toks = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'<' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'>' {
+                j += 1;
+            }
+            toks.push(CMapTok::Hex(s[i + 1..j.min(bytes.len())].to_string()));
+            i = j + 1;
+        } else if c == b'[' {
+            toks.push(CMapTok::ArrayOpen);
+            i += 1;
+        } else if c == b']' {
+            toks.push(CMapTok::ArrayClose);
+            i += 1;
+        } else if c.is_ascii_alphabetic() {
+            let mut j = i;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric()) {
+                j += 1;
+            }
+            toks.push(CMapTok::Word(s[i..j].to_string()));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    toks
+}
+
 /// Parse a ToUnicode CMap into code -> unicode string.
 fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
     let mut map = HashMap::new();
-    let s = String::from_utf8_lossy(data);
-    let tokens: Vec<&str> = s.split_whitespace().collect();
-
+    let toks = tokenize_cmap(data);
     let mut i = 0;
-    while i < tokens.len() {
-        match tokens[i] {
-            "beginbfchar" => {
+    while i < toks.len() {
+        match &toks[i] {
+            CMapTok::Word(w) if w == "beginbfchar" => {
                 i += 1;
-                while i < tokens.len() && tokens[i] != "endbfchar" {
-                    if i + 1 < tokens.len() {
-                        if let (Some(code), Some(dst)) =
-                            (parse_hex_code(tokens[i]), parse_hex_utf16(tokens[i + 1]))
-                        {
+                while i + 1 < toks.len() && !matches!(&toks[i], CMapTok::Word(w) if w == "endbfchar") {
+                    if let (CMapTok::Hex(code), CMapTok::Hex(dst)) = (&toks[i], &toks[i + 1]) {
+                        if let (Some(code), Some(dst)) = (hex_code(code), hex_utf16(dst)) {
                             map.insert(code, dst);
                         }
                         i += 2;
                     } else {
-                        break;
+                        i += 1;
                     }
                 }
             }
-            "beginbfrange" => {
+            CMapTok::Word(w) if w == "beginbfrange" => {
                 i += 1;
-                while i < tokens.len() && tokens[i] != "endbfrange" {
-                    // <lo> <hi> <dst>  — array dst not handled (rare); skip those gracefully.
-                    if i + 2 < tokens.len() {
-                        let lo = parse_hex_code(tokens[i]);
-                        let hi = parse_hex_code(tokens[i + 1]);
-                        if tokens[i + 2].starts_with('[') {
-                            // array form: advance past array
-                            i += 2;
-                            while i < tokens.len() && !tokens[i].ends_with(']') {
-                                i += 1;
-                            }
-                            i += 1;
-                            continue;
-                        }
-                        let dst = parse_hex_utf16(tokens[i + 2]);
-                        if let (Some(lo), Some(hi), Some(dst)) = (lo, hi, dst) {
-                            if let Some(first) = dst.chars().next() {
-                                let base = first as u32;
-                                for (k, code) in (lo..=hi).enumerate() {
-                                    if let Some(ch) = char::from_u32(base + k as u32) {
-                                        map.insert(code, ch.to_string());
+                while i < toks.len() && !matches!(&toks[i], CMapTok::Word(w) if w == "endbfrange") {
+                    // <lo> <hi> ( <dst> | [ <d0> <d1> ... ] )
+                    if i + 2 < toks.len() {
+                        if let (CMapTok::Hex(lo), CMapTok::Hex(hi)) = (&toks[i], &toks[i + 1]) {
+                            let (lo, hi) = (hex_code(lo), hex_code(hi));
+                            match &toks[i + 2] {
+                                CMapTok::Hex(dst) => {
+                                    if let (Some(lo), Some(hi), Some(dst)) = (lo, hi, hex_utf16(dst)) {
+                                        if let Some(first) = dst.chars().next() {
+                                            let base = first as u32;
+                                            for (k, code) in (lo..=hi).enumerate() {
+                                                if let Some(ch) = char::from_u32(base + k as u32) {
+                                                    map.insert(code, ch.to_string());
+                                                }
+                                            }
+                                        }
                                     }
+                                    i += 3;
                                 }
+                                CMapTok::ArrayOpen => {
+                                    let mut code = lo.unwrap_or(0);
+                                    i += 3;
+                                    while i < toks.len() && !matches!(&toks[i], CMapTok::ArrayClose) {
+                                        if let CMapTok::Hex(dst) = &toks[i] {
+                                            if let Some(s) = hex_utf16(dst) {
+                                                map.insert(code, s);
+                                            }
+                                            code += 1;
+                                        }
+                                        i += 1;
+                                    }
+                                    i += 1; // ArrayClose
+                                }
+                                _ => i += 1,
                             }
+                        } else {
+                            i += 1;
                         }
-                        i += 3;
                     } else {
                         break;
                     }
@@ -558,22 +611,21 @@ fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
     map
 }
 
-fn parse_hex_code(tok: &str) -> Option<u32> {
-    let h = tok.trim_start_matches('<').trim_end_matches('>');
-    u32::from_str_radix(h, 16).ok()
+fn hex_code(h: &str) -> Option<u32> {
+    u32::from_str_radix(h.trim(), 16).ok()
 }
 
-fn parse_hex_utf16(tok: &str) -> Option<String> {
-    let h = tok.trim_start_matches('<').trim_end_matches('>');
-    if h.len() % 2 != 0 {
+fn hex_utf16(h: &str) -> Option<String> {
+    let h = h.trim();
+    if h.is_empty() || h.len() % 2 != 0 {
         return None;
     }
-    let bytes: Vec<u8> = (0..h.len())
-        .step_by(2)
-        .filter_map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok())
+    let bytes: Vec<u8> =
+        (0..h.len()).step_by(2).filter_map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok()).collect();
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .map(|c| if c.len() == 2 { ((c[0] as u16) << 8) | c[1] as u16 } else { c[0] as u16 })
         .collect();
-    let units: Vec<u16> =
-        bytes.chunks(2).map(|c| if c.len() == 2 { ((c[0] as u16) << 8) | c[1] as u16 } else { c[0] as u16 }).collect();
     Some(String::from_utf16_lossy(&units))
 }
 
