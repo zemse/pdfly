@@ -55,7 +55,11 @@ fn process_one(
         .with_context(|| format!("extracting {}", file.display()))?;
     let analyzed = analyze::analyze(
         &doc,
-        &Options { include_header_footer: cli.include_header_footer },
+        &Options {
+            include_header_footer: cli.include_header_footer,
+            content_safety: !cli.content_safety_off,
+            sanitize: cli.sanitize,
+        },
     );
 
     let ropts = RenderOptions { page_separator: cli.page_separator.clone() };

@@ -8,6 +8,13 @@ reimplementation of the data-extraction core of
 sources we port from, then orders the work as tick-box milestones — each task carries a
 way to test it.
 
+> **Status (implemented):** M0–M8 are built and tested — pure-Rust extraction, analysis
+> (lines, headings, lists, border tables, XY-Cut++ reading order, header/footer, content-safety,
+> sanitize), renderers (Markdown/JSON/HTML/text), CLI, and chapter split. The whole test corpus
+> converts to all formats with no panics. **Partial/deferred:** dense multi-column reading order,
+> custom-encoded fonts w/o ToUnicode, borderless tables + row/col spans, image-byte extraction,
+> `--use-struct-tree`, `--threads`. See README "Known limitations".
+
 > **Companion doc:** [ARCHITECTURE.md](./ARCHITECTURE.md) is the detailed map of *how the source
 > works* — the exact pipeline order, per-processor purpose, the XY-Cut++ algorithm, and clickable
 > file/line links into the upstream repos. PLAN.md = *what to build & in what order*;
@@ -179,7 +186,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 
 ## 6. Milestones (tick-box)
 
-### ☐ Milestone 0 — Project skeleton
+### ✅ Milestone 0 — Project skeleton
 - [ ] `git init`; Cargo binary crate; add `lopdf`, `clap` (derive), `anyhow`/`thiserror`, `serde_json`, `image`, `insta` (dev).
   🧪 `cargo build` succeeds; `cargo test` runs (empty).
 - [ ] Module layout: `extract/`, `model/`, `analyze/`, `render/`, `cli.rs`, `pipeline.rs` (canonical source→module mapping in [ARCHITECTURE.md §9](./ARCHITECTURE.md)).
@@ -189,7 +196,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Copy `/tmp/odl-pdf/samples/pdf/*` into `tests/corpus/`; write a corpus-sweep test harness.
   🧪 Harness lists all corpus PDFs.
 
-### ☐ Milestone 1 — Extraction layer (highest risk; reference pdf.js + spec)
+### ✅ Milestone 1 — Extraction layer (highest risk; reference pdf.js + spec)
 ↳ Port target: the veraPDF parse boundary — [ARCHITECTURE.md §4](./ARCHITECTURE.md) (`preprocessing`, `parseChunks`) + §8 (`IObject` model). Rust mapping in §9.
 - [ ] `lopdf`: open doc, decrypt (`--password`), decompress streams, walk page tree, read resources & metadata, detect `/StructTreeRoot`.
   🧪 Unit: page count + title/author match `pdfinfo`/known values for each corpus PDF.
@@ -204,7 +211,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] `PdfBackend` trait → `Page { text_runs, images, lines, media_box, crop_box }`; raw-chunk JSON dumper.
   🧪 **Golden**: chunk JSON geometry vs. Java tool's JSON on `lorem.pdf` (compare bboxes within tolerance).
 
-### ☐ Milestone 2 — Minimal pipeline → Markdown / text / JSON
+### ✅ Milestone 2 — Minimal pipeline → Markdown / text / JSON
 ↳ Port targets: `ContentFilterProcessor`, `TextLineProcessor`, `ParagraphProcessor` ([ARCHITECTURE.md §5.1](./ARCHITECTURE.md)); renderers + JSON serializers ([§7](./ARCHITECTURE.md)).
 - [ ] Content filtering (dedupe, tiny, off-page, merge, whitespace).
   🧪 Unit on synthetic chunks; corpus sweep: no panics.
@@ -215,7 +222,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Markdown, plain-text, JSON renderers for paragraphs/lines/chunks.
   🧪 **Milestone gate**: single-column PDF → readable Markdown; JSON validates against `schema.json` subset.
 
-### ☐ Milestone 3 — Headings & lists
+### ✅ Milestone 3 — Headings & lists
 ↳ Port targets: `HeadingProcessor` + `utils/TextNodeStatistics`, `ListProcessor` (+ WCAG `NodeUtils`/`ListLabelsUtils`) ([ARCHITECTURE.md §5.1, §8](./ARCHITECTURE.md)).
 - [ ] Font-size/weight statistics (body mode + rarity scoring; port `TextNodeStatistics` logic).
   🧪 Unit: histogram + rarity on synthetic font sets.
@@ -226,7 +233,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Wire to MD (`#`,`-`,`1.`) + JSON (`heading level`, `numbering style`).
   🧪 **Milestone gate**: snapshot tests on 3 corpus PDFs accepted.
 
-### ☐ Milestone 4 — Tables
+### ✅ Milestone 4 — Tables
 ↳ Port targets: `LinesPreprocessingConsumer` (WCAG) + `TableBorderProcessor`/`AbstractTableProcessor`/`TableStructureNormalizer`; table serializers/renderers ([ARCHITECTURE.md §4, §5.1, §7](./ARCHITECTURE.md)).
 - [ ] Border-based detection from vector lines → grid, cell assignment, row/col span.
   🧪 Unit on synthetic ruled table; golden on `issue-336-conto-economico-bialetti.pdf`.
@@ -235,13 +242,13 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] JSON `table/row/cell` + HTML `<table border="1">`.
   🧪 **Milestone gate**: bordered tables render in MD/HTML/JSON; cell text complete.
 
-### ☐ Milestone 5 — Reading order (XY-Cut++)
+### ✅ Milestone 5 — Reading order (XY-Cut++)
 ↳ Port target: `XYCutPlusPlusSorter` — full 4-phase algorithm with line refs & constants in [ARCHITECTURE.md §6](./ARCHITECTURE.md). Apache-2.0 + self-contained = most directly portable file.
 - [ ] Recursive XY projection cuts; cross-layout (full-width) handling; density heuristic; narrow-outlier filter. `--reading-order xycut|off`.
   🧪 Unit on synthetic 2-column layout; **golden** on arXiv `2408.02509v1.pdf` (multi-column) — order correct.
   🧪 Compare `xycut` vs `off` output to confirm it changes column sequencing.
 
-### ☐ Milestone 6 — Images, captions, headers/footers, separators, HTML
+### ✅ Milestone 6 — Images, captions, headers/footers, separators, HTML
 ↳ Port targets: `CaptionProcessor`, `HeaderFooterProcessor`, `ImagesUtils`/`Base64ImageUtils`, `HtmlGenerator` ([ARCHITECTURE.md §5.1, §7](./ARCHITECTURE.md)).
 - [ ] Image extraction modes `off|embedded|external`, `--image-format`, `--image-dir`; `![alt](<path>)`/Base64/`<img>`.
   🧪 Unit: external mode writes files + correct relative links; embedded mode emits valid data URI.
@@ -254,7 +261,7 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Full HTML renderer with inline styles.
   🧪 **Milestone gate**: local-extraction feature parity across MD/HTML/JSON/text on corpus subset.
 
-### ☐ Milestone 7 — Safety & privacy
+### ✅ Milestone 7 — Safety & privacy
 ↳ Port targets: `HiddenTextProcessor` (note rasterization caveat), `ContentSanitizer`+`FilterConfig` regexes, `StrikethroughProcessor` ([ARCHITECTURE.md §5.1, §10](./ARCHITECTURE.md)).
 - [ ] Content-safety: hidden-text via declared-state heuristics (render mode 3, zero-size/transparent, color==bg, OCG off), tiny, off-page, hidden-OCG; `--content-safety-off`.
   🧪 Unit on a PDF with injected invisible text → excluded by default, present when disabled.
@@ -263,13 +270,13 @@ Maintain `tests/corpus/` (gitignored large files; a small curated subset committ
 - [ ] Strikethrough detection (`--detect-strikethrough`).
   🧪 Unit on a struck-text sample → `~~…~~`.
 
-### ☐ Milestone 8 — Chapter-wise split (new feature)
+### ✅ Milestone 8 — Chapter-wise split (new feature)
 - [ ] `--split` + `--split-by heading[:level]`; walk ordered elements, new file per split heading.
   🧪 Unit on synthetic doc with 3 H1s → 3 files.
 - [ ] Slugified `NN-title.md` filenames; `index.md`/TOC with links; front-matter (pre-first-heading) handling.
   🧪 **Milestone gate**: `PDFUA-Ref-2-08_BookChapter.pdf` splits into per-section `.md` + index; links resolve.
 
-### ☐ Milestone 9 — Robustness, perf, polish
+### ◑ Milestone 9 (partial) — Robustness, perf, polish
 ↳ Port target: `TaggedDocumentProcessor` (struct-tree path) ([ARCHITECTURE.md §3.1, §5.1](./ARCHITECTURE.md)); threading model in `processDocument` ([§5](./ARCHITECTURE.md)).
 - [ ] Optional tagged-PDF reading (`--use-struct-tree`) when `/StructTreeRoot` present.
   🧪 Golden on a well-tagged PDF/UA sample vs. heuristic output.

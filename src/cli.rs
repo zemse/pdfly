@@ -47,6 +47,14 @@ pub struct Cli {
     #[arg(long)]
     pub include_header_footer: bool,
 
+    /// Disable content-safety filtering (tiny / off-page text).
+    #[arg(long)]
+    pub content_safety_off: bool,
+
+    /// Redact emails, URLs, phone numbers, IPs, and card-like numbers.
+    #[arg(long)]
+    pub sanitize: bool,
+
     /// Write the single requested format to stdout instead of files.
     #[arg(long)]
     pub to_stdout: bool,

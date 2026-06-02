@@ -5,26 +5,56 @@
 //! maps heading font sizes to levels 1..=6.
 
 pub mod reading_order;
+pub mod sanitize;
 pub mod tables;
 
-use crate::extract::{Document, Rect};
+use crate::extract::{Document, Rect, TextRun};
 use crate::model::{AnalyzedDoc, Element, Line, ListItem};
 
 mod lines;
 use lines::build_lines;
 
-#[derive(Default)]
 pub struct Options {
+    /// Keep repeated page headers/footers in output.
     pub include_header_footer: bool,
+    /// Content-safety filters (tiny / off-page text). On by default.
+    pub content_safety: bool,
+    /// Redact emails/URLs/phones/etc.
+    pub sanitize: bool,
 }
 
-pub fn analyze(doc: &Document, _opts: &Options) -> AnalyzedDoc {
+impl Default for Options {
+    fn default() -> Self {
+        Options { include_header_footer: false, content_safety: true, sanitize: false }
+    }
+}
+
+pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
     let mut elements: Vec<Element> = Vec::new();
     let mut heading_sizes: Vec<f64> = Vec::new();
 
+    // Phase A: per-page filtered lines.
+    let mut page_lines: Vec<Vec<Line>> = Vec::with_capacity(doc.pages.len());
     for page in &doc.pages {
+        let runs = filter_runs(&page.runs, page.media_box, opts.content_safety);
+        page_lines.push(build_lines(&runs));
+    }
+
+    // Phase B: detect repeating headers/footers across pages.
+    let drop_set = if opts.include_header_footer {
+        std::collections::HashSet::new()
+    } else {
+        detect_headers_footers(&doc.pages, &page_lines)
+    };
+
+    for (pi, page) in doc.pages.iter().enumerate() {
         let page_no = page.number;
-        let mut text_lines = build_lines(&page.runs);
+        let mut text_lines: Vec<Line> = page_lines[pi]
+            .iter()
+            .enumerate()
+            .filter(|(li, _)| !drop_set.contains(&(pi, *li)))
+            .map(|(_, l)| l.clone())
+            .collect();
 
         // Tables consume the lines that fall inside them.
         let (detected, consumed) = tables::detect(&page.lines, &text_lines);
@@ -103,7 +133,93 @@ pub fn analyze(doc: &Document, _opts: &Options) -> AnalyzedDoc {
 
     assign_heading_levels(&mut elements, &mut heading_sizes);
 
-    AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements }
+    let mut analyzed = AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements };
+    if opts.sanitize {
+        sanitize::sanitize_doc(&mut analyzed);
+    }
+    analyzed
+}
+
+/// Content-safety filtering: drop tiny text and content outside the page box.
+fn filter_runs(runs: &[TextRun], media: Rect, content_safety: bool) -> Vec<TextRun> {
+    if !content_safety {
+        return runs.to_vec();
+    }
+    let margin = 2.0;
+    runs.iter()
+        .filter(|r| {
+            // tiny text
+            if r.font_size < 1.5 || r.bbox.height() < 1.0 {
+                return false;
+            }
+            // off-page (center outside media box + margin)
+            let cx = r.bbox.center_x();
+            let cy = r.bbox.center_y();
+            cx >= media.left - margin
+                && cx <= media.right + margin
+                && cy >= media.bottom - margin
+                && cy <= media.top + margin
+        })
+        .cloned()
+        .collect()
+}
+
+/// Find (page_index, line_index) of lines that repeat at the top/bottom of
+/// pages (running headers/footers, page numbers). Needs >= 3 pages.
+fn detect_headers_footers(
+    pages: &[crate::extract::Page],
+    page_lines: &[Vec<Line>],
+) -> std::collections::HashSet<(usize, usize)> {
+    use std::collections::HashMap;
+    let mut drop = std::collections::HashSet::new();
+    if pages.len() < 3 {
+        return drop;
+    }
+    // Map normalized header/footer text -> list of (page, line) occurrences.
+    let mut seen: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    for (pi, page) in pages.iter().enumerate() {
+        let h = page.media_box.height();
+        if h <= 0.0 {
+            continue;
+        }
+        let top_cut = page.media_box.top - h * 0.10;
+        let bot_cut = page.media_box.bottom + h * 0.10;
+        for (li, line) in page_lines[pi].iter().enumerate() {
+            let cy = line.bbox.center_y();
+            if cy >= top_cut || cy <= bot_cut {
+                let key = normalize_running(&line.text);
+                if key.len() >= 2 {
+                    seen.entry(key).or_default().push((pi, li));
+                }
+            }
+        }
+    }
+    let threshold = (pages.len() / 2).max(2);
+    for (_, occ) in seen {
+        // Distinct pages it appears on.
+        let mut pset: Vec<usize> = occ.iter().map(|(p, _)| *p).collect();
+        pset.sort_unstable();
+        pset.dedup();
+        if pset.len() >= threshold {
+            for o in occ {
+                drop.insert(o);
+            }
+        }
+    }
+    drop
+}
+
+/// Normalize running text so "Page 3" and "Page 4" collapse together.
+fn normalize_running(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.trim().chars() {
+        if c.is_ascii_digit() {
+            out.push('#');
+        } else {
+            out.extend(c.to_lowercase());
+        }
+    }
+    out
 }
 
 /// Length-weighted most common font size (rounded to 0.5pt).
