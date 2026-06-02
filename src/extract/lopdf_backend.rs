@@ -338,6 +338,8 @@ impl<'a> Interp<'a> {
         let mut tx_total = 0.0;
         let mut text = String::new();
 
+        // A large negative TJ adjustment is a positioning-based word space.
+        const SPACE_ADJ: f64 = -120.0;
         for item in arr {
             match item {
                 Object::String(bytes, _) => {
@@ -348,8 +350,18 @@ impl<'a> Interp<'a> {
                     let chars = num_chars(&dec.text) as f64 * self.char_spacing;
                     tx_total += (w + chars + spaces) * th;
                 }
-                Object::Integer(n) => tx_total -= (*n as f64 / 1000.0) * tfs * th,
-                Object::Real(n) => tx_total -= (*n as f64 / 1000.0) * tfs * th,
+                Object::Integer(n) => {
+                    if (*n as f64) < SPACE_ADJ && !text.ends_with(' ') && !text.is_empty() {
+                        text.push(' ');
+                    }
+                    tx_total -= (*n as f64 / 1000.0) * tfs * th;
+                }
+                Object::Real(n) => {
+                    if (*n as f64) < SPACE_ADJ && !text.ends_with(' ') && !text.is_empty() {
+                        text.push(' ');
+                    }
+                    tx_total -= (*n as f64 / 1000.0) * tfs * th;
+                }
                 _ => {}
             }
         }

@@ -1,0 +1,269 @@
+//! Analysis pipeline: extracted [`Page`]s -> ordered semantic [`Element`]s.
+//!
+//! Stages (per page): line assembly -> table detection -> reading order ->
+//! block classification (headings / paragraphs / lists). Then a global pass
+//! maps heading font sizes to levels 1..=6.
+
+pub mod reading_order;
+pub mod tables;
+
+use crate::extract::{Document, Rect};
+use crate::model::{AnalyzedDoc, Element, Line, ListItem};
+
+mod lines;
+use lines::build_lines;
+
+#[derive(Default)]
+pub struct Options {
+    pub include_header_footer: bool,
+}
+
+pub fn analyze(doc: &Document, _opts: &Options) -> AnalyzedDoc {
+    let mut elements: Vec<Element> = Vec::new();
+    let mut heading_sizes: Vec<f64> = Vec::new();
+
+    for page in &doc.pages {
+        let page_no = page.number;
+        let mut text_lines = build_lines(&page.runs);
+
+        // Tables consume the lines that fall inside them.
+        let (detected, consumed) = tables::detect(&page.lines, &text_lines);
+        let consumed: std::collections::HashSet<usize> = consumed.into_iter().collect();
+        let remaining: Vec<Line> = text_lines
+            .drain(..)
+            .enumerate()
+            .filter(|(i, _)| !consumed.contains(i))
+            .map(|(_, l)| l)
+            .collect();
+
+        // Body font size = length-weighted mode of remaining line sizes.
+        let body_size = body_font_size(&remaining);
+
+        // Build ordered units: each table + each text line, sorted by reading order.
+        #[derive(Clone)]
+        enum Unit {
+            Table(usize),
+            Line(usize),
+        }
+        let mut unit_boxes: Vec<Rect> = Vec::new();
+        let mut units: Vec<Unit> = Vec::new();
+        for (ti, t) in detected.iter().enumerate() {
+            unit_boxes.push(t.bbox);
+            units.push(Unit::Table(ti));
+        }
+        for (li, l) in remaining.iter().enumerate() {
+            unit_boxes.push(l.bbox);
+            units.push(Unit::Line(li));
+        }
+        let ordering = reading_order::order(&unit_boxes);
+
+        // Walk ordered units, classifying line runs into blocks.
+        let mut pending_lines: Vec<usize> = Vec::new();
+        let mut page_elements: Vec<Element> = Vec::new();
+
+        let flush = |pending: &mut Vec<usize>,
+                     out: &mut Vec<Element>,
+                     hsizes: &mut Vec<f64>| {
+            if pending.is_empty() {
+                return;
+            }
+            let lines_slice: Vec<&Line> = pending.iter().map(|&i| &remaining[i]).collect();
+            classify_block(&lines_slice, body_size, page_no, out, hsizes);
+            pending.clear();
+        };
+
+        for &u in &ordering {
+            match &units[u] {
+                Unit::Table(ti) => {
+                    flush(&mut pending_lines, &mut page_elements, &mut heading_sizes);
+                    let t = &detected[*ti];
+                    page_elements.push(Element::Table {
+                        rows: t.rows.clone(),
+                        bbox: t.bbox,
+                        page: page_no,
+                    });
+                }
+                Unit::Line(li) => pending_lines.push(*li),
+            }
+        }
+        flush(&mut pending_lines, &mut page_elements, &mut heading_sizes);
+
+        // Images as standalone elements.
+        for img in &page.images {
+            page_elements.push(Element::Image {
+                name: img.name.clone(),
+                alt: String::new(),
+                bbox: img.bbox,
+                page: page_no,
+            });
+        }
+
+        elements.extend(page_elements);
+    }
+
+    assign_heading_levels(&mut elements, &mut heading_sizes);
+
+    AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements }
+}
+
+/// Length-weighted most common font size (rounded to 0.5pt).
+fn body_font_size(lines: &[Line]) -> f64 {
+    use std::collections::HashMap;
+    let mut hist: HashMap<i64, usize> = HashMap::new();
+    for l in lines {
+        let key = (l.font_size * 2.0).round() as i64;
+        *hist.entry(key).or_insert(0) += l.text.chars().count().max(1);
+    }
+    hist.into_iter()
+        .max_by_key(|&(_, w)| w)
+        .map(|(k, _)| k as f64 / 2.0)
+        .unwrap_or(10.0)
+}
+
+/// Classify a run of consecutive lines (already separated by big gaps/tables)
+/// into headings, list, or paragraph elements.
+fn classify_block(
+    lines: &[&Line],
+    body_size: f64,
+    page: usize,
+    out: &mut Vec<Element>,
+    heading_sizes: &mut Vec<f64>,
+) {
+    // Split into sub-blocks on large vertical gaps or heading/list boundaries.
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+
+        // List item?
+        if let Some((ordered, _marker)) = list_marker(&line.text) {
+            // Gather consecutive list items.
+            let mut items = Vec::new();
+            let mut bbox = Rect::empty();
+            let mut ord = ordered;
+            while i < lines.len() {
+                if let Some((o2, _)) = list_marker(&lines[i].text) {
+                    let txt = strip_marker(&lines[i].text);
+                    bbox.union(&lines[i].bbox);
+                    items.push(ListItem { text: txt, bbox: lines[i].bbox });
+                    ord = ord || o2;
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            out.push(Element::List { ordered: ord, items, bbox, page });
+            continue;
+        }
+
+        // Heading? Larger-than-body font, or bold + short, standing relatively alone.
+        let is_larger = line.font_size >= body_size * 1.15;
+        let is_bold_short = line.bold && line.text.chars().count() <= 80;
+        if (is_larger || is_bold_short) && !line.text.trim().is_empty() {
+            heading_sizes.push(line.font_size);
+            out.push(Element::Heading {
+                level: 0, // filled in globally
+                size: line.font_size,
+                text: line.text.trim().to_string(),
+                bbox: line.bbox,
+                page,
+            });
+            i += 1;
+            continue;
+        }
+
+        // Paragraph: merge following non-heading, non-list lines with small gaps.
+        let mut text = line.text.trim_end().to_string();
+        let mut bbox = line.bbox;
+        let mut j = i + 1;
+        while j < lines.len() {
+            let next = lines[j];
+            if list_marker(&next.text).is_some() {
+                break;
+            }
+            if next.font_size >= body_size * 1.15 || (next.bold && next.text.chars().count() <= 80) {
+                break;
+            }
+            let gap = bbox.bottom - next.bbox.top;
+            let line_h = next.bbox.height().max(next.font_size);
+            if gap > line_h * 1.0 {
+                break; // paragraph break
+            }
+            if !text.ends_with(' ') {
+                text.push(' ');
+            }
+            text.push_str(next.text.trim());
+            bbox.union(&next.bbox);
+            j += 1;
+        }
+        out.push(Element::Paragraph { text: normalize_ws(&text), bbox, page });
+        i = j;
+    }
+}
+
+/// Map distinct heading font sizes (descending) to levels 1..=6 across the doc.
+fn assign_heading_levels(elements: &mut [Element], sizes: &mut [f64]) {
+    let mut distinct: Vec<i64> = sizes.iter().map(|s| (s * 2.0).round() as i64).collect();
+    distinct.sort_unstable_by(|a, b| b.cmp(a));
+    distinct.dedup();
+    for el in elements.iter_mut() {
+        if let Element::Heading { level, size, .. } = el {
+            let key = (*size * 2.0).round() as i64;
+            let rank = distinct.iter().position(|&d| d == key).unwrap_or(0);
+            *level = (rank as u8 + 1).min(6);
+        }
+    }
+}
+
+/// Return (ordered, marker_len) if the line begins with a list marker.
+fn list_marker(text: &str) -> Option<(bool, usize)> {
+    let t = text.trim_start();
+    let mut chars = t.chars();
+    if let Some(first) = chars.next() {
+        if matches!(first, '•' | '◦' | '▪' | '■' | '◆' | '‣' | '·') {
+            return Some((false, 1));
+        }
+        if (first == '-' || first == '*' || first == '–' || first == '—')
+            && chars.next().map(|c| c == ' ').unwrap_or(false)
+        {
+            return Some((false, 2));
+        }
+    }
+    // numbered: "1." "1)" "12." "a)" "iv."
+    let bytes = t.as_bytes();
+    let mut k = 0;
+    while k < bytes.len() && bytes[k].is_ascii_digit() {
+        k += 1;
+    }
+    if k > 0 && k < bytes.len() && (bytes[k] == b'.' || bytes[k] == b')') {
+        return Some((true, k + 1));
+    }
+    if !bytes.is_empty()
+        && bytes[0].is_ascii_alphabetic()
+        && bytes.len() > 1
+        && (bytes[1] == b'.' || bytes[1] == b')')
+    {
+        return Some((true, 2));
+    }
+    None
+}
+
+fn strip_marker(text: &str) -> String {
+    let t = text.trim_start();
+    if let Some((_, len)) = list_marker(text) {
+        let mut chars = t.char_indices();
+        let mut byte = 0;
+        for _ in 0..len {
+            if let Some((b, _)) = chars.next() {
+                byte = b;
+            }
+        }
+        // advance one more char index to get end of marker
+        let rest = if let Some((b, _)) = chars.next() { &t[b..] } else { t.get(byte + 1..).unwrap_or("") };
+        return rest.trim_start().to_string();
+    }
+    t.to_string()
+}
+
+fn normalize_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
