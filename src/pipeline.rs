@@ -51,8 +51,14 @@ fn process_one(
     formats: &[Format],
     pages: Option<&BTreeSet<usize>>,
 ) -> Result<()> {
-    let doc = LopdfBackend::load(file, cli.password.as_deref(), pages)
+    let mut doc = LopdfBackend::load(file, cli.password.as_deref(), pages)
         .with_context(|| format!("extracting {}", file.display()))?;
+    // Optional OCR for scanned pages (no-op unless built with --features ocr).
+    match crate::ocr::augment(&mut doc) {
+        Ok(n) if n > 0 && !cli.quiet => eprintln!("  OCR added {n} text line(s)"),
+        Err(e) => eprintln!("  ocr: {e:#}"),
+        _ => {}
+    }
     let mut analyzed = analyze::analyze(
         &doc,
         &Options {

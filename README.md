@@ -32,15 +32,42 @@ pdf-rs secret.pdf -p mypassword
 pdf-rs book.pdf -o out/ --split
 pdf-rs book.pdf -o out/ --split --split-level 2   # split on H1 and H2
 
-# redact emails / URLs / phone numbers / IPs / card numbers
-pdf-rs report.pdf --sanitize
+# images: extract to files (default), embed as base64, or drop
+pdf-rs report.pdf --image-output external --image-format png
+pdf-rs report.pdf --image-output embedded
+pdf-rs report.pdf --image-output off
 
-# stream to stdout (single format)
+# use the PDF's own tags (tagged PDFs) instead of layout heuristics
+pdf-rs tagged.pdf --use-struct-tree
+
+# write a tagged PDF (adds a structure tree) / an annotated debug PDF
+pdf-rs report.pdf --tagged-pdf
+pdf-rs report.pdf --annotate
+
+# redact sensitive data; detect strikethrough; HTML tables in Markdown
+pdf-rs report.pdf --sanitize --detect-strikethrough --markdown-with-html
+
+# faster on big PDFs (deterministic)
+pdf-rs big.pdf --threads 8
+
+# stream to stdout (single format); whole directory (recursive)
 pdf-rs report.pdf -f markdown --to-stdout
-
-# whole directory (recursive)
 pdf-rs ./pdfs/ -o out/
 ```
+
+### OCR for scanned PDFs (optional)
+
+OCR is a pure-Rust optional feature (no native deps). Build with it enabled and
+point to [ocrs](https://github.com/robertknight/ocrs) `.rten` model files:
+
+```bash
+cargo build --release --features ocr
+export PDFRS_OCR_DETECTION_MODEL=/path/to/text-detection.rten
+export PDFRS_OCR_RECOGNITION_MODEL=/path/to/text-recognition.rten
+pdf-rs scanned.pdf            # image-only pages are OCR'd automatically
+```
+
+The default build omits OCR entirely, keeping the binary small.
 
 Run `pdf-rs --help` for all options.
 
