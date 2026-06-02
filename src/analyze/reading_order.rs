@@ -21,6 +21,13 @@ pub fn order(boxes: &[Rect]) -> Vec<usize> {
     if idx.len() <= 1 {
         return idx;
     }
+    // Explicit two-column handling: if the page has a clean vertical gutter,
+    // read full-width elements + each column in proper order. This robustly
+    // handles a full-width title/abstract over a two-column body, which plain
+    // recursive XY-cut can interleave.
+    if let Some(gx) = find_vertical_gutter(boxes, &idx) {
+        return column_order(boxes, &idx, gx);
+    }
     let cross = identify_cross_layout(boxes, &idx);
     let main: Vec<usize> = idx.iter().copied().filter(|i| !cross.contains(i)).collect();
     if main.is_empty() {
@@ -30,6 +37,102 @@ pub fn order(boxes: &[Rect]) -> Vec<usize> {
     let prefer_h = density > DENSITY_THRESHOLD;
     let sorted_main = segment(boxes, &main, prefer_h);
     merge_cross(boxes, sorted_main, cross)
+}
+
+/// Detect a single clean vertical gutter splitting the page into two columns.
+/// Returns the gutter x if found. Full-width elements are excluded from the
+/// detection (they cross the gutter); the gutter is the widest uncovered
+/// central x-band among the narrow (column-width) boxes.
+fn find_vertical_gutter(boxes: &[Rect], idx: &[usize]) -> Option<f64> {
+    let mut region = Rect::empty();
+    for &i in idx {
+        region.union(&boxes[i]);
+    }
+    let w = region.width();
+    if w <= 0.0 {
+        return None;
+    }
+    // Column-width boxes only (exclude likely full-width spanners).
+    let narrow: Vec<&Rect> = idx.iter().map(|&i| &boxes[i]).filter(|b| b.width() < 0.6 * w).collect();
+    if narrow.len() < 4 {
+        return None;
+    }
+    // Union of x-intervals, then largest gap in the central region.
+    let mut iv: Vec<(f64, f64)> = narrow.iter().map(|b| (b.left, b.right)).collect();
+    iv.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (l, r) in iv {
+        match merged.last_mut() {
+            Some(last) if l <= last.1 + 1.0 => last.1 = last.1.max(r),
+            _ => merged.push((l, r)),
+        }
+    }
+    let (lo, hi) = (region.left + 0.2 * w, region.right - 0.2 * w);
+    let mut best_gap = 0.0;
+    let mut gutter = None;
+    for win in merged.windows(2) {
+        let gap_l = win[0].1;
+        let gap_r = win[1].0;
+        let center = (gap_l + gap_r) / 2.0;
+        let gap = gap_r - gap_l;
+        if center >= lo && center <= hi && gap > best_gap && gap >= 12.0 {
+            best_gap = gap;
+            gutter = Some(center);
+        }
+    }
+    let gx = gutter?;
+    // Require column content on both sides.
+    let left = narrow.iter().filter(|b| b.right <= gx).count();
+    let right = narrow.iter().filter(|b| b.left >= gx).count();
+    if left >= 2 && right >= 2 {
+        Some(gx)
+    } else {
+        None
+    }
+}
+
+/// Order with a known gutter: full-width spanners act as band separators;
+/// within each band the left column is read top-to-bottom, then the right.
+fn column_order(boxes: &[Rect], idx: &[usize], gx: f64) -> Vec<usize> {
+    let mut straddle: Vec<usize> = Vec::new();
+    let mut left: Vec<usize> = Vec::new();
+    let mut right: Vec<usize> = Vec::new();
+    for &i in idx {
+        let b = &boxes[i];
+        if b.left < gx - 1.0 && b.right > gx + 1.0 {
+            straddle.push(i);
+        } else if b.center_x() < gx {
+            left.push(i);
+        } else {
+            right.push(i);
+        }
+    }
+    let by_y = |v: &mut Vec<usize>| {
+        v.sort_by(|&a, &b| {
+            boxes[b].top.partial_cmp(&boxes[a].top).unwrap().then(boxes[a].left.partial_cmp(&boxes[b].left).unwrap())
+        })
+    };
+    by_y(&mut straddle);
+    by_y(&mut left);
+    by_y(&mut right);
+
+    let mut out = Vec::with_capacity(idx.len());
+    let (mut li, mut ri) = (0, 0);
+    for &s in &straddle {
+        let sy = boxes[s].center_y();
+        while li < left.len() && boxes[left[li]].center_y() > sy {
+            out.push(left[li]);
+            li += 1;
+        }
+        while ri < right.len() && boxes[right[ri]].center_y() > sy {
+            out.push(right[ri]);
+            ri += 1;
+        }
+        out.push(s);
+    }
+    out.extend_from_slice(&left[li..]);
+    out.extend_from_slice(&right[ri..]);
+    out
 }
 
 fn identify_cross_layout(boxes: &[Rect], idx: &[usize]) -> Vec<usize> {
@@ -274,6 +377,24 @@ mod tests {
         ];
         let ord = order(&boxes);
         assert_eq!(ord, vec![0, 1, 2, 3], "left column fully before right");
+    }
+
+    #[test]
+    fn title_over_two_column_body_via_gutter() {
+        // Full-width title, then a two-column body with 3 lines each. The gutter
+        // detector should fire and read: title, full left column, full right column.
+        let boxes = vec![
+            Rect::new(0.0, 760.0, 300.0, 790.0), // 0 title (full width)
+            Rect::new(0.0, 700.0, 140.0, 712.0), // 1 L1
+            Rect::new(0.0, 670.0, 140.0, 682.0), // 2 L2
+            Rect::new(0.0, 640.0, 140.0, 652.0), // 3 L3
+            Rect::new(160.0, 700.0, 300.0, 712.0), // 4 R1
+            Rect::new(160.0, 670.0, 300.0, 682.0), // 5 R2
+            Rect::new(160.0, 640.0, 300.0, 652.0), // 6 R3
+        ];
+        assert!(find_vertical_gutter(&boxes, &(0..boxes.len()).collect::<Vec<_>>()).is_some());
+        let ord = order(&boxes);
+        assert_eq!(ord, vec![0, 1, 2, 3, 4, 5, 6], "title, then left column, then right column");
     }
 
     #[test]
