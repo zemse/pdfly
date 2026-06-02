@@ -7,6 +7,7 @@ pub mod images;
 pub mod json;
 pub mod md;
 pub mod split;
+pub mod tagged;
 pub mod text;
 
 #[derive(Clone, Debug, Default)]

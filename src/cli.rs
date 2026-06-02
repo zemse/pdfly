@@ -79,6 +79,10 @@ pub struct Cli {
     #[arg(long)]
     pub annotate: bool,
 
+    /// Write a tagged PDF (adds a /StructTreeRoot structure tree to a copy).
+    #[arg(long)]
+    pub tagged_pdf: bool,
+
     /// Detect strikethrough text and wrap it in ~~ (Markdown).
     #[arg(long)]
     pub detect_strikethrough: bool,

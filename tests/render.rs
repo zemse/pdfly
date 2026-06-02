@@ -138,6 +138,27 @@ fn hidden_text_is_filtered_by_content_safety() {
 }
 
 #[test]
+fn tagged_pdf_has_structure_tree() {
+    let a = analyze_file("lorem.pdf");
+    let tmp = std::env::temp_dir().join("pdfrs_tagged.pdf");
+    pdf_rs::render::tagged::write_tagged_pdf(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
+    let bytes = std::fs::read(&tmp).unwrap();
+    assert!(bytes.windows(14).any(|w| w == b"StructTreeRoot"), "has struct tree root");
+    // Re-loadable.
+    let again = LopdfBackend::load(&tmp, None, None).unwrap();
+    assert!(!again.pages.is_empty());
+}
+
+#[test]
+fn annotated_pdf_is_written_and_loadable() {
+    let a = analyze_file("lorem.pdf");
+    let tmp = std::env::temp_dir().join("pdfrs_annotated.pdf");
+    pdf_rs::render::annotate::write_annotated(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
+    let again = LopdfBackend::load(&tmp, None, None).unwrap();
+    assert_eq!(again.pages.len(), 1);
+}
+
+#[test]
 fn html_and_text_render_without_panic() {
     let a = analyze_file("lorem.pdf");
     let html = render::to_html(&a);

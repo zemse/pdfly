@@ -94,6 +94,17 @@ fn process_one(
         analyzed.elements.retain(|e| !matches!(e, crate::model::Element::Image { .. }));
     }
 
+    // Tagged PDF (structure tree).
+    if cli.tagged_pdf {
+        std::fs::create_dir_all(&out_dir).ok();
+        let path = out_dir.join(format!("{base}.tagged.pdf"));
+        match crate::render::tagged::write_tagged_pdf(file, cli.password.as_deref(), &analyzed, &path) {
+            Ok(()) if !cli.quiet => eprintln!("  wrote {}", path.display()),
+            Err(e) => eprintln!("  tagged-pdf failed: {e:#}"),
+            _ => {}
+        }
+    }
+
     // Annotated debug PDF.
     if cli.annotate {
         std::fs::create_dir_all(&out_dir).ok();
