@@ -63,7 +63,11 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
             let fs = runs[i].font_size.max(1.0);
             if let Some(pr) = prev_right_split {
                 let gap = runs[i].bbox.left - pr;
-                if gap > (fs * 2.0).max(18.0) {
+                // Split on a gap clearly wider than inter-word spacing (~0.25·fs):
+                // column gutters, tab stops, and table-cell gaps. Tuned against
+                // opendataloader-bench — finer segmentation here improves reading
+                // order, heading separation, and borderless-table column recovery.
+                if gap > (fs * 1.3).max(10.0) {
                     segments.push(std::mem::take(&mut sub));
                 }
             }
