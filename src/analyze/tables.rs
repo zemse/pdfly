@@ -198,7 +198,25 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
         .filter(|r| r.iter().filter(|c| !c.text.trim().is_empty()).count() >= 2)
         .count();
     let fill_ratio = filled as f64 / (n_rows * n_cols).max(1) as f64;
-    if !any_text || filled < 4 || rows_multi < 2 || cols_with_text < 2 || fill_ratio < 0.15 {
+    // A sparse grid whose largest cell holds a whole paragraph is prose/figure
+    // text that fell into the grid box (e.g. a bar chart whose bars read as
+    // column rules, with the surrounding caption dropped into one cell). Dense
+    // grids with a long cell are real tables (a wide description column), so
+    // only reject when the grid is both sparse and carries a paragraph cell.
+    let max_cell = rows
+        .iter()
+        .flatten()
+        .map(|c| c.text.trim().chars().count())
+        .max()
+        .unwrap_or(0);
+    let chart_like = max_cell > 300 && fill_ratio < 0.4;
+    if !any_text
+        || filled < 4
+        || rows_multi < 2
+        || cols_with_text < 2
+        || fill_ratio < 0.15
+        || chart_like
+    {
         return (vec![], vec![]);
     }
 
