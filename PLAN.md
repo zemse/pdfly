@@ -7,19 +7,30 @@ what shipped. This file lists only what's left.
 ## Open (tractable)
 
 - [ ] **Dense academic multi-column edge cases** — clean two-column pages read correctly via gutter
-  detection; pages with a vertical margin stamp + an abstract that lives *inside* a column can still
-  mis-order. Would need per-region column detection (recurse gutter detection into bands).
-  *(Attempted: a band-recursive rewrite was prototyped but reverted — naively treating full-width
-  spanners as band separators fragments full-width code listings inside two-column papers
-  (`2408.02509v1`), and it gave no clear net win on the corpus. Needs validation data — see threshold
-  tuning below — before re-attempting.)*
-- [ ] **Threshold tuning (in progress)** — `opendataloader-bench` (200 PDFs w/ ground truth) is
-  cloned at `../opendataloader-bench`; scoring harness wired up (see memory `opendataloader-bench-setup`).
-  Baseline overall 0.717 → **0.766** so far (NID 0.847→0.860, TEDS 0.309→0.378, MHS 0.501→0.635) via:
-  numbered section headings no longer eaten as lists; borderless table detection on by default with
-  precision guards (fill/regularity + prose-cell + ToC rejection). Remaining: TEDS still 0.378 (12 of
-  42 table docs still score 0 — borderless tables not yet detected), MHS 0.635 (< 0.74 threshold).
-  Also unblocks validating the multi-column rework above.
+  detection; a residual subset still interleaves columns (e.g. bench doc `01030000000012`).
+  Re-validated against `opendataloader-bench`: the *catastrophic* NID failures are not reading-order
+  bugs but extraction failures (scanned/vector/chart pages with little or no embedded text — docs 5,
+  141, 27, 110, 200), which are OCR-blocked, not tunable. The genuine multi-column residual is small.
+  *(A band-recursive rewrite was prototyped and reverted — naively treating full-width spanners as
+  band separators fragments full-width code listings in two-column papers (`2408.02509v1`); still
+  high-risk for marginal gain.)*
+
+## Done — threshold tuning against opendataloader-bench
+
+`opendataloader-bench` (200 PDFs w/ ground truth) cloned at `../opendataloader-bench`; scoring harness
+wired up (see memory `opendataloader-bench-setup`). **Overall 0.717 → 0.785** (NID 0.847→0.879,
+TEDS 0.309→0.394, MHS 0.501→0.663), all 26 tests passing. Changes:
+- Numbered section headings ("4. Entropy") no longer eaten as single-item ordered lists.
+- Borderless (column-aligned) table detection on by default (`--table-method ruled` for ruled-only),
+  with precision guards: fill/regularity, prose-cell rejection, per-column ToC rejection.
+- Finer line segmentation: split baseline runs on gaps > max(1.3·fs, 10pt) — recovers table columns,
+  improves reading order and heading separation simultaneously.
+- Reject sparse ruled grids with a paragraph-sized cell (bar-chart false positives).
+
+Remaining gap to thresholds (nid 0.90 / teds 0.49 / mhs 0.74) is the hard tail: ~16 TEDS-zero docs
+are image/vector tables (need OCR) or tight-gap multi-column/wide tables (need word-level table
+reconstruction, not threshold tuning); ~4 MHS-zero docs have headings indistinct from body font
+(lowering thresholds would cost precision on the 100+ docs that already score well).
 
 ## Blocked in this environment (need external assets)
 
