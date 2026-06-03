@@ -21,5 +21,5 @@ pub struct RenderOptions {
 pub use html::to_html;
 pub use json::to_json;
 pub use md::to_markdown;
-pub use split::{split_markdown, SplitChapter};
+pub use split::{SplitChapter, split_markdown};
 pub use text::to_text;

@@ -2,12 +2,14 @@
 
 use std::path::Path;
 
-use pdf_rs::analyze::{analyze, Options};
+use pdf_rs::analyze::{Options, analyze};
 use pdf_rs::extract::{LopdfBackend, PdfBackend};
-use pdf_rs::render::{self, split, RenderOptions};
+use pdf_rs::render::{self, RenderOptions, split};
 
 fn corpus(name: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus")
+        .join(name)
 }
 
 fn analyze_file(name: &str) -> pdf_rs::model::AnalyzedDoc {
@@ -19,10 +21,16 @@ fn analyze_file(name: &str) -> pdf_rs::model::AnalyzedDoc {
 fn lorem_markdown_has_heading_and_paragraph() {
     let a = analyze_file("lorem.pdf");
     let md = render::to_markdown(&a, &RenderOptions::default());
-    assert!(md.starts_with("# Lorem Ipsum"), "title heading first:\n{md}");
+    assert!(
+        md.starts_with("# Lorem Ipsum"),
+        "title heading first:\n{md}"
+    );
     assert!(md.to_lowercase().contains("dolor sit amet"), "body present");
     // Heading then paragraph as distinct blocks.
-    assert!(md.contains("\n\nLorem ipsum dolor"), "paragraph separated from heading");
+    assert!(
+        md.contains("\n\nLorem ipsum dolor"),
+        "paragraph separated from heading"
+    );
 }
 
 #[test]
@@ -45,7 +53,11 @@ fn lorem_json_is_valid_and_structured() {
 fn book_chapter_splits_into_multiple_files() {
     let a = analyze_file("pdfua-1-reference-suite-1-1/PDFUA-Ref-2-08_BookChapter.pdf");
     let chapters = split::split_markdown(&a, 1, &RenderOptions::default());
-    assert!(chapters.len() >= 2, "expected multiple chapters, got {}", chapters.len());
+    assert!(
+        chapters.len() >= 2,
+        "expected multiple chapters, got {}",
+        chapters.len()
+    );
     // filenames are NN-slug.md and unique
     let mut names: Vec<&str> = chapters.iter().map(|c| c.filename.as_str()).collect();
     let count = names.len();
@@ -58,7 +70,7 @@ fn book_chapter_splits_into_multiple_files() {
 
 #[test]
 fn images_extract_to_files() {
-    use pdf_rs::render::images::{process_images, ImageMode};
+    use pdf_rs::render::images::{ImageMode, process_images};
     let doc = LopdfBackend::load(
         &corpus("pdfua-1-reference-suite-1-1/PDFUA-Ref-2-01_Magazine-danish.pdf"),
         None,
@@ -85,21 +97,47 @@ fn markdown_html_table_mode() {
         elements: vec![Element::Table {
             rows: vec![
                 vec![
-                    Cell { text: "A".into(), col_span: 2, row_span: 1, covered: false },
-                    Cell { text: String::new(), col_span: 1, row_span: 1, covered: true },
+                    Cell {
+                        text: "A".into(),
+                        col_span: 2,
+                        row_span: 1,
+                        covered: false,
+                    },
+                    Cell {
+                        text: String::new(),
+                        col_span: 1,
+                        row_span: 1,
+                        covered: true,
+                    },
                 ],
                 vec![
-                    Cell { text: "b".into(), col_span: 1, row_span: 1, covered: false },
-                    Cell { text: "c".into(), col_span: 1, row_span: 1, covered: false },
+                    Cell {
+                        text: "b".into(),
+                        col_span: 1,
+                        row_span: 1,
+                        covered: false,
+                    },
+                    Cell {
+                        text: "c".into(),
+                        col_span: 1,
+                        row_span: 1,
+                        covered: false,
+                    },
                 ],
             ],
             bbox: Rect::new(0.0, 0.0, 10.0, 10.0),
             page: 1,
         }],
     };
-    let opts = RenderOptions { html_tables: true, ..Default::default() };
+    let opts = RenderOptions {
+        html_tables: true,
+        ..Default::default()
+    };
     let md = render::to_markdown(&doc, &opts);
-    assert!(md.contains("<table>") && md.contains("colspan=\"2\""), "html table with span:\n{md}");
+    assert!(
+        md.contains("<table>") && md.contains("colspan=\"2\""),
+        "html table with span:\n{md}"
+    );
 
     let gfm = render::to_markdown(&doc, &RenderOptions::default());
     assert!(gfm.contains("| --- |"), "default is GFM pipe table");
@@ -131,11 +169,26 @@ fn hidden_text_is_filtered_by_content_safety() {
             image_data: Default::default(),
         }],
     };
-    let on = analyze(&doc, &Options { content_safety: true, ..Default::default() });
+    let on = analyze(
+        &doc,
+        &Options {
+            content_safety: true,
+            ..Default::default()
+        },
+    );
     let md_on = render::to_markdown(&on, &RenderOptions::default());
-    assert!(md_on.contains("Visible") && !md_on.contains("hidden"), "hidden dropped: {md_on}");
+    assert!(
+        md_on.contains("Visible") && !md_on.contains("hidden"),
+        "hidden dropped: {md_on}"
+    );
 
-    let off = analyze(&doc, &Options { content_safety: false, ..Default::default() });
+    let off = analyze(
+        &doc,
+        &Options {
+            content_safety: false,
+            ..Default::default()
+        },
+    );
     let md_off = render::to_markdown(&off, &RenderOptions::default());
     assert!(md_off.contains("hidden"), "hidden kept when safety off");
 }
@@ -146,19 +199,43 @@ fn tagged_pdf_has_marked_content_and_round_trips() {
     let tmp = std::env::temp_dir().join("pdfrs_tagged.pdf");
     pdf_rs::render::tagged::write_tagged_pdf(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
     let bytes = std::fs::read(&tmp).unwrap();
-    assert!(bytes.windows(14).any(|w| w == b"StructTreeRoot"), "has struct tree root");
-    assert!(bytes.windows(3).any(|w| w == b"BDC"), "content has marked-content");
+    assert!(
+        bytes.windows(14).any(|w| w == b"StructTreeRoot"),
+        "has struct tree root"
+    );
+    assert!(
+        bytes.windows(3).any(|w| w == b"BDC"),
+        "content has marked-content"
+    );
 
     // Re-load: runs carry MCIDs and the structure tree maps back to text.
     let again = LopdfBackend::load(&tmp, None, None).unwrap();
-    assert!(again.structure.is_some(), "tagged output has a structure tree");
-    assert!(again.pages[0].runs.iter().any(|r| r.mcid.is_some()), "runs carry MCIDs");
+    assert!(
+        again.structure.is_some(),
+        "tagged output has a structure tree"
+    );
+    assert!(
+        again.pages[0].runs.iter().any(|r| r.mcid.is_some()),
+        "runs carry MCIDs"
+    );
 
     // Reading our own tags reconstructs the heading + paragraph.
-    let via_tags = analyze(&again, &Options { use_struct_tree: true, ..Default::default() });
+    let via_tags = analyze(
+        &again,
+        &Options {
+            use_struct_tree: true,
+            ..Default::default()
+        },
+    );
     let md = render::to_markdown(&via_tags, &RenderOptions::default());
-    assert!(md.starts_with("# Lorem Ipsum"), "struct-tree read recovers heading:\n{md}");
-    assert!(md.to_lowercase().contains("dolor sit amet"), "and the paragraph");
+    assert!(
+        md.starts_with("# Lorem Ipsum"),
+        "struct-tree read recovers heading:\n{md}"
+    );
+    assert!(
+        md.to_lowercase().contains("dolor sit amet"),
+        "and the paragraph"
+    );
 }
 
 #[test]

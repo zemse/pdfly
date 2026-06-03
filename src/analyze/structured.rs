@@ -45,7 +45,11 @@ fn build_mcid_text(doc: &Document) -> McidText {
     let mut out = McidText::new();
     for (key, mut runs) in groups {
         runs.sort_by(|a, b| {
-            b.bbox.top.partial_cmp(&a.bbox.top).unwrap().then(a.bbox.left.partial_cmp(&b.bbox.left).unwrap())
+            b.bbox
+                .top
+                .partial_cmp(&a.bbox.top)
+                .unwrap()
+                .then(a.bbox.left.partial_cmp(&b.bbox.left).unwrap())
         });
         let mut text = String::new();
         let mut bbox = Rect::empty();
@@ -56,7 +60,10 @@ fn build_mcid_text(doc: &Document) -> McidText {
             text.push_str(&r.text);
             bbox.union(&r.bbox);
         }
-        out.insert(key, (text.split_whitespace().collect::<Vec<_>>().join(" "), bbox));
+        out.insert(
+            key,
+            (text.split_whitespace().collect::<Vec<_>>().join(" "), bbox),
+        );
     }
     out
 }
@@ -67,10 +74,20 @@ fn gather(elem: &StructElem, map: &McidText) -> (String, Rect, usize) {
     let mut bbox = Rect::empty();
     let mut page = 0usize;
     gather_into(elem, map, &mut text, &mut bbox, &mut page);
-    (text.split_whitespace().collect::<Vec<_>>().join(" "), bbox, page)
+    (
+        text.split_whitespace().collect::<Vec<_>>().join(" "),
+        bbox,
+        page,
+    )
 }
 
-fn gather_into(elem: &StructElem, map: &McidText, text: &mut String, bbox: &mut Rect, page: &mut usize) {
+fn gather_into(
+    elem: &StructElem,
+    map: &McidText,
+    text: &mut String,
+    bbox: &mut Rect,
+    page: &mut usize,
+) {
     for key in &elem.mcids {
         if let Some((t, b)) = map.get(key) {
             if !t.is_empty() {
@@ -112,7 +129,13 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
     if let Some(level) = heading_level(tag) {
         let (text, bbox, page) = gather(elem, map);
         if !text.is_empty() {
-            out.push(Element::Heading { level, size: 0.0, text, bbox, page });
+            out.push(Element::Heading {
+                level,
+                size: 0.0,
+                text,
+                bbox,
+                page,
+            });
         }
         return;
     }
@@ -136,13 +159,25 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                         if page == 0 {
                             page = p;
                         }
-                        items.push(ListItem { text, bbox: b, level: 0 });
+                        items.push(ListItem {
+                            text,
+                            bbox: b,
+                            level: 0,
+                        });
                     }
                 }
             }
             if !items.is_empty() {
-                let ordered = items.first().map(|i| starts_ordered(&i.text)).unwrap_or(false);
-                out.push(Element::List { ordered, items, bbox, page });
+                let ordered = items
+                    .first()
+                    .map(|i| starts_ordered(&i.text))
+                    .unwrap_or(false);
+                out.push(Element::List {
+                    ordered,
+                    items,
+                    bbox,
+                    page,
+                });
             }
         }
         "Table" => {
@@ -158,7 +193,12 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                         if page == 0 {
                             page = p;
                         }
-                        cells.push(Cell { text, col_span: 1, row_span: 1, covered: false });
+                        cells.push(Cell {
+                            text,
+                            col_span: 1,
+                            row_span: 1,
+                            covered: false,
+                        });
                     }
                 }
                 if cells.iter().any(|c| !c.text.trim().is_empty()) {
@@ -166,7 +206,14 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                 }
             }
             // Only emit if the structure tree actually mapped to cell text.
-            if rows.len() >= 1 && rows.iter().flatten().filter(|c| !c.text.trim().is_empty()).count() >= 2 {
+            if rows.len() >= 1
+                && rows
+                    .iter()
+                    .flatten()
+                    .filter(|c| !c.text.trim().is_empty())
+                    .count()
+                    >= 2
+            {
                 out.push(Element::Table { rows, bbox, page });
             }
         }

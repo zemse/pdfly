@@ -37,7 +37,9 @@ pub fn process_images(
     base: &str,
 ) -> Result<usize> {
     if mode == ImageMode::Off {
-        analyzed.elements.retain(|e| !matches!(e, Element::Image { .. }));
+        analyzed
+            .elements
+            .retain(|e| !matches!(e, Element::Image { .. }));
         return Ok(0);
     }
 
@@ -68,7 +70,11 @@ pub fn process_images(
             let (ext, bytes) = encode(data, format);
             let link = match mode {
                 ImageMode::Embedded => {
-                    let mime = if ext == "jpg" { "image/jpeg" } else { "image/png" };
+                    let mime = if ext == "jpg" {
+                        "image/jpeg"
+                    } else {
+                        "image/png"
+                    };
                     format!("data:{};base64,{}", mime, base64(&bytes))
                 }
                 ImageMode::External => {
@@ -93,7 +99,11 @@ fn encode(data: &ImageData, format: &str) -> (&'static str, Vec<u8>) {
     match data {
         // Already JPEG: pass through regardless of requested format.
         ImageData::Jpeg(b) => ("jpg", b.clone()),
-        ImageData::Rgba { width, height, data } => {
+        ImageData::Rgba {
+            width,
+            height,
+            data,
+        } => {
             let img = image::RgbaImage::from_raw(*width, *height, data.clone());
             if let Some(img) = img {
                 let mut buf = std::io::Cursor::new(Vec::new());
@@ -116,11 +126,7 @@ fn rel_link(out_dir: &Path, image_dir: &Path, fname: &str) -> String {
     let full = image_dir.join(fname);
     let rel = pathdiff(&full, out_dir).unwrap_or_else(|| full.clone());
     let s = rel.to_string_lossy().replace('\\', "/");
-    if s.contains(' ') {
-        format!("<{s}>")
-    } else {
-        s
-    }
+    if s.contains(' ') { format!("<{s}>") } else { s }
 }
 
 /// Minimal relative-path computation (no external crate).
@@ -150,12 +156,24 @@ fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
         out.push(T[((n >> 18) & 63) as usize] as char);
         out.push(T[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }

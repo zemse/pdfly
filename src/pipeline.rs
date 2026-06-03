@@ -4,12 +4,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::analyze::{self, Options};
 use crate::cli::Cli;
 use crate::extract::{LopdfBackend, PdfBackend};
-use crate::render::{self, split, RenderOptions};
+use crate::render::{self, RenderOptions, split};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Format {
@@ -47,7 +47,10 @@ pub fn run(cli: &Cli) -> Result<()> {
                 total_pages += n;
                 if let Some(started) = started {
                     let secs = started.elapsed().as_secs_f64();
-                    eprintln!("  timing: {n} page(s) in {secs:.3}s ({:.1} pages/s)", pps(n, secs));
+                    eprintln!(
+                        "  timing: {n} page(s) in {secs:.3}s ({:.1} pages/s)",
+                        pps(n, secs)
+                    );
                 }
             }
             Err(e) => eprintln!("error: {}: {e:#}", file.display()),
@@ -66,11 +69,7 @@ pub fn run(cli: &Cli) -> Result<()> {
 
 /// Pages per second, guarding against a zero/negative elapsed time.
 fn pps(pages: usize, secs: f64) -> f64 {
-    if secs > 0.0 {
-        pages as f64 / secs
-    } else {
-        0.0
-    }
+    if secs > 0.0 { pages as f64 / secs } else { 0.0 }
 }
 
 /// Process a single PDF; returns the number of pages analyzed (for throughput).
@@ -106,9 +105,15 @@ fn process_one(
         html_tables: cli.markdown_with_html,
     };
     let out_dir = cli.output_dir.clone().unwrap_or_else(|| {
-        file.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
+        file.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
     });
-    let base = file.file_stem().and_then(|s| s.to_str()).unwrap_or("output").to_string();
+    let base = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output")
+        .to_string();
 
     // Resolve images (write files / embed / drop) before rendering.
     if !cli.to_stdout {
@@ -119,7 +124,13 @@ fn process_one(
             .unwrap_or_else(|| out_dir.join(format!("{base}_images")));
         std::fs::create_dir_all(&out_dir).ok();
         let n = render::images::process_images(
-            &doc, &mut analyzed, mode, &cli.image_format, &out_dir, &image_dir, &base,
+            &doc,
+            &mut analyzed,
+            mode,
+            &cli.image_format,
+            &out_dir,
+            &image_dir,
+            &base,
         )
         .unwrap_or(0);
         if n > 0 && !cli.quiet {
@@ -127,14 +138,21 @@ fn process_one(
         }
     } else {
         // stdout: drop images (can't reference files).
-        analyzed.elements.retain(|e| !matches!(e, crate::model::Element::Image { .. }));
+        analyzed
+            .elements
+            .retain(|e| !matches!(e, crate::model::Element::Image { .. }));
     }
 
     // Tagged PDF (structure tree).
     if cli.tagged_pdf {
         std::fs::create_dir_all(&out_dir).ok();
         let path = out_dir.join(format!("{base}.tagged.pdf"));
-        match crate::render::tagged::write_tagged_pdf(file, cli.password.as_deref(), &analyzed, &path) {
+        match crate::render::tagged::write_tagged_pdf(
+            file,
+            cli.password.as_deref(),
+            &analyzed,
+            &path,
+        ) {
             Ok(()) if !cli.quiet => eprintln!("  wrote {}", path.display()),
             Err(e) => eprintln!("  tagged-pdf failed: {e:#}"),
             _ => {}
@@ -145,7 +163,12 @@ fn process_one(
     if cli.annotate {
         std::fs::create_dir_all(&out_dir).ok();
         let path = out_dir.join(format!("{base}.annotated.pdf"));
-        match crate::render::annotate::write_annotated(file, cli.password.as_deref(), &analyzed, &path) {
+        match crate::render::annotate::write_annotated(
+            file,
+            cli.password.as_deref(),
+            &analyzed,
+            &path,
+        ) {
             Ok(()) if !cli.quiet => eprintln!("  wrote {}", path.display()),
             Err(e) => eprintln!("  annotate failed: {e:#}"),
             _ => {}
@@ -156,23 +179,25 @@ fn process_one(
     if cli.split {
         let chapters = split::split_markdown(&analyzed, cli.split_level.max(1), &ropts);
         let dir = out_dir.join(&base);
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         for ch in &chapters {
             std::fs::write(dir.join(&ch.filename), &ch.content)?;
         }
         let index = split::build_index(&chapters, analyzed.meta.title.as_deref());
         std::fs::write(dir.join("index.md"), index)?;
         if !cli.quiet {
-            eprintln!("  wrote {} chapter file(s) -> {}", chapters.len(), dir.display());
+            eprintln!(
+                "  wrote {} chapter file(s) -> {}",
+                chapters.len(),
+                dir.display()
+            );
         }
         if formats == [Format::Markdown] {
             return Ok(analyzed.num_pages);
         }
     }
 
-    std::fs::create_dir_all(&out_dir)
-        .with_context(|| format!("creating {}", out_dir.display()))?;
+    std::fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
     for &fmt in formats {
         let (ext, content) = match fmt {
@@ -197,7 +222,11 @@ fn process_one(
 
 fn parse_formats(s: &str) -> Result<Vec<Format>> {
     let mut out = Vec::new();
-    for part in s.split(',').map(|p| p.trim().to_lowercase()).filter(|p| !p.is_empty()) {
+    for part in s
+        .split(',')
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty())
+    {
         let f = match part.as_str() {
             "markdown" | "md" => Format::Markdown,
             "json" => Format::Json,
@@ -220,8 +249,14 @@ pub fn parse_pages(s: &str) -> Result<BTreeSet<usize>> {
     let mut set = BTreeSet::new();
     for part in s.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()) {
         if let Some((a, b)) = part.split_once('-') {
-            let a: usize = a.trim().parse().with_context(|| format!("bad page '{part}'"))?;
-            let b: usize = b.trim().parse().with_context(|| format!("bad page '{part}'"))?;
+            let a: usize = a
+                .trim()
+                .parse()
+                .with_context(|| format!("bad page '{part}'"))?;
+            let b: usize = b
+                .trim()
+                .parse()
+                .with_context(|| format!("bad page '{part}'"))?;
             if a == 0 || b < a {
                 bail!("invalid page range '{part}'");
             }
@@ -271,7 +306,10 @@ fn collect_dir(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn is_pdf(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("pdf")).unwrap_or(false)
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

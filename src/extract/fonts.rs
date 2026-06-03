@@ -60,7 +60,13 @@ impl Font {
         let codes: Vec<u32> = if self.two_byte {
             bytes
                 .chunks(2)
-                .map(|c| if c.len() == 2 { ((c[0] as u32) << 8) | c[1] as u32 } else { c[0] as u32 })
+                .map(|c| {
+                    if c.len() == 2 {
+                        ((c[0] as u32) << 8) | c[1] as u32
+                    } else {
+                        c[0] as u32
+                    }
+                })
                 .collect()
         } else {
             bytes.iter().map(|&b| b as u32).collect()
@@ -76,14 +82,22 @@ impl Font {
                 self.push_via_encoding(code, &mut text);
             }
             // width
-            let w = self.widths.get(&code).copied().unwrap_or(self.default_width);
+            let w = self
+                .widths
+                .get(&code)
+                .copied()
+                .unwrap_or(self.default_width);
             total_width += w;
             if !self.two_byte && code == 0x20 {
                 space_count += 1;
             }
         }
 
-        DecodedRun { text, width_units: total_width, space_count }
+        DecodedRun {
+            text,
+            width_units: total_width,
+            space_count,
+        }
     }
 
     fn push_via_encoding(&self, code: u32, text: &mut String) {
@@ -115,8 +129,16 @@ pub struct DecodedRun {
 pub fn build_font(doc: &Document, font_dict: &Dictionary) -> Font {
     let mut font = Font::default();
 
-    let subtype = font_dict.get(b"Subtype").ok().and_then(name_string).unwrap_or_default();
-    font.base_font = font_dict.get(b"BaseFont").ok().and_then(name_string).unwrap_or_default();
+    let subtype = font_dict
+        .get(b"Subtype")
+        .ok()
+        .and_then(name_string)
+        .unwrap_or_default();
+    font.base_font = font_dict
+        .get(b"BaseFont")
+        .ok()
+        .and_then(name_string)
+        .unwrap_or_default();
     let bf_lower = font.base_font.to_lowercase();
     font.bold = bf_lower.contains("bold");
     font.italic = bf_lower.contains("italic") || bf_lower.contains("oblique");
@@ -155,8 +177,11 @@ pub fn build_font(doc: &Document, font_dict: &Dictionary) -> Font {
         }
     } else {
         // Simple font: byte codes.
-        let first_char =
-            font_dict.get(b"FirstChar").ok().and_then(|o| o.as_i64().ok()).unwrap_or(0) as u32;
+        let first_char = font_dict
+            .get(b"FirstChar")
+            .ok()
+            .and_then(|o| o.as_i64().ok())
+            .unwrap_or(0) as u32;
         if let Ok(w) = font_dict.get(b"Widths") {
             if let Ok(arr) = resolve(doc, w).and_then(|o| o.as_array().map(|a| a.to_vec())) {
                 for (i, item) in arr.iter().enumerate() {
@@ -261,7 +286,9 @@ fn load_embedded(bytes: &[u8]) -> Option<Embedded> {
     let mut code_to_unicode: HashMap<u8, char> = HashMap::new();
     for sub in cmap.subtables {
         for code in 0u32..=255 {
-            let gid = sub.glyph_index(code).or_else(|| sub.glyph_index(0xF000 + code));
+            let gid = sub
+                .glyph_index(code)
+                .or_else(|| sub.glyph_index(0xF000 + code));
             if let Some(gid) = gid {
                 if let Some(&ch) = gid_to_unicode.get(&(gid.0 as u32)) {
                     code_to_unicode.entry(code as u8).or_insert(ch);
@@ -270,7 +297,10 @@ fn load_embedded(bytes: &[u8]) -> Option<Embedded> {
         }
     }
 
-    Some(Embedded { gid_to_unicode, code_to_unicode })
+    Some(Embedded {
+        gid_to_unicode,
+        code_to_unicode,
+    })
 }
 
 fn apply_descriptor_flags(doc: &Document, desc: &Dictionary, font: &mut Font) {
@@ -322,7 +352,8 @@ fn parse_cid_widths(arr: &[Object], out: &mut HashMap<u32, f64>) {
                 // c_first c_last w
                 _ => {
                     if i + 2 < arr.len() {
-                        if let (Ok(c_last), Some(width)) = (arr[i + 1].as_i64(), fnum(&arr[i + 2])) {
+                        if let (Ok(c_last), Some(width)) = (arr[i + 1].as_i64(), fnum(&arr[i + 2]))
+                        {
                             for cid in c..=(c_last as u32) {
                                 out.insert(cid, width);
                             }
@@ -351,7 +382,10 @@ fn build_simple_encoding(
 
     // Resolve the PDF /Encoding entry once (may be a base name and/or a dict
     // with /BaseEncoding and /Differences).
-    let enc_obj = font_dict.get(b"Encoding").ok().and_then(|e| resolve(doc, e).ok().cloned());
+    let enc_obj = font_dict
+        .get(b"Encoding")
+        .ok()
+        .and_then(|e| resolve(doc, e).ok().cloned());
     let base_name_pinned = match &enc_obj {
         Some(Object::Name(_)) => true,
         Some(Object::Dictionary(d)) => d.get(b"BaseEncoding").is_ok(),
@@ -565,17 +599,49 @@ fn single_letter_glyph(name: &str) -> Option<char> {
         return Some(first);
     }
     let c = match name {
-        "aacute" => 'á', "agrave" => 'à', "acircumflex" => 'â', "atilde" => 'ã',
-        "adieresis" => 'ä', "aring" => 'å', "ae" => 'æ', "ccedilla" => 'ç',
-        "eacute" => 'é', "egrave" => 'è', "ecircumflex" => 'ê', "edieresis" => 'ë',
-        "iacute" => 'í', "igrave" => 'ì', "icircumflex" => 'î', "idieresis" => 'ï',
-        "ntilde" => 'ñ', "oacute" => 'ó', "ograve" => 'ò', "ocircumflex" => 'ô',
-        "otilde" => 'õ', "odieresis" => 'ö', "oslash" => 'ø', "oe" => 'œ',
-        "uacute" => 'ú', "ugrave" => 'ù', "ucircumflex" => 'û', "udieresis" => 'ü',
-        "yacute" => 'ý', "ydieresis" => 'ÿ', "germandbls" => 'ß',
-        "Aacute" => 'Á', "Agrave" => 'À', "Adieresis" => 'Ä', "Ccedilla" => 'Ç',
-        "Eacute" => 'É', "Egrave" => 'È', "Edieresis" => 'Ë', "Ntilde" => 'Ñ',
-        "Oacute" => 'Ó', "Odieresis" => 'Ö', "Oslash" => 'Ø', "Udieresis" => 'Ü',
+        "aacute" => 'á',
+        "agrave" => 'à',
+        "acircumflex" => 'â',
+        "atilde" => 'ã',
+        "adieresis" => 'ä',
+        "aring" => 'å',
+        "ae" => 'æ',
+        "ccedilla" => 'ç',
+        "eacute" => 'é',
+        "egrave" => 'è',
+        "ecircumflex" => 'ê',
+        "edieresis" => 'ë',
+        "iacute" => 'í',
+        "igrave" => 'ì',
+        "icircumflex" => 'î',
+        "idieresis" => 'ï',
+        "ntilde" => 'ñ',
+        "oacute" => 'ó',
+        "ograve" => 'ò',
+        "ocircumflex" => 'ô',
+        "otilde" => 'õ',
+        "odieresis" => 'ö',
+        "oslash" => 'ø',
+        "oe" => 'œ',
+        "uacute" => 'ú',
+        "ugrave" => 'ù',
+        "ucircumflex" => 'û',
+        "udieresis" => 'ü',
+        "yacute" => 'ý',
+        "ydieresis" => 'ÿ',
+        "germandbls" => 'ß',
+        "Aacute" => 'Á',
+        "Agrave" => 'À',
+        "Adieresis" => 'Ä',
+        "Ccedilla" => 'Ç',
+        "Eacute" => 'É',
+        "Egrave" => 'È',
+        "Edieresis" => 'Ë',
+        "Ntilde" => 'Ñ',
+        "Oacute" => 'Ó',
+        "Odieresis" => 'Ö',
+        "Oslash" => 'Ø',
+        "Udieresis" => 'Ü',
         _ => return None,
     };
     Some(c)
@@ -635,7 +701,9 @@ fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
         match &toks[i] {
             CMapTok::Word(w) if w == "beginbfchar" => {
                 i += 1;
-                while i + 1 < toks.len() && !matches!(&toks[i], CMapTok::Word(w) if w == "endbfchar") {
+                while i + 1 < toks.len()
+                    && !matches!(&toks[i], CMapTok::Word(w) if w == "endbfchar")
+                {
                     if let (CMapTok::Hex(code), CMapTok::Hex(dst)) = (&toks[i], &toks[i + 1]) {
                         if let (Some(code), Some(dst)) = (hex_code(code), hex_utf16(dst)) {
                             map.insert(code, dst);
@@ -655,7 +723,9 @@ fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
                             let (lo, hi) = (hex_code(lo), hex_code(hi));
                             match &toks[i + 2] {
                                 CMapTok::Hex(dst) => {
-                                    if let (Some(lo), Some(hi), Some(dst)) = (lo, hi, hex_utf16(dst)) {
+                                    if let (Some(lo), Some(hi), Some(dst)) =
+                                        (lo, hi, hex_utf16(dst))
+                                    {
                                         if let Some(first) = dst.chars().next() {
                                             let base = first as u32;
                                             for (k, code) in (lo..=hi).enumerate() {
@@ -670,7 +740,8 @@ fn parse_to_unicode(data: &[u8]) -> HashMap<u32, String> {
                                 CMapTok::ArrayOpen => {
                                     let mut code = lo.unwrap_or(0);
                                     i += 3;
-                                    while i < toks.len() && !matches!(&toks[i], CMapTok::ArrayClose) {
+                                    while i < toks.len() && !matches!(&toks[i], CMapTok::ArrayClose)
+                                    {
                                         if let CMapTok::Hex(dst) = &toks[i] {
                                             if let Some(s) = hex_utf16(dst) {
                                                 map.insert(code, s);
@@ -706,11 +777,19 @@ fn hex_utf16(h: &str) -> Option<String> {
     if h.is_empty() || h.len() % 2 != 0 {
         return None;
     }
-    let bytes: Vec<u8> =
-        (0..h.len()).step_by(2).filter_map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok()).collect();
+    let bytes: Vec<u8> = (0..h.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&h[i..i + 2], 16).ok())
+        .collect();
     let units: Vec<u16> = bytes
         .chunks(2)
-        .map(|c| if c.len() == 2 { ((c[0] as u16) << 8) | c[1] as u16 } else { c[0] as u16 })
+        .map(|c| {
+            if c.len() == 2 {
+                ((c[0] as u16) << 8) | c[1] as u16
+            } else {
+                c[0] as u16
+            }
+        })
         .collect();
     Some(String::from_utf16_lossy(&units))
 }

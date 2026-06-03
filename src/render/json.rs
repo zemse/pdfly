@@ -1,7 +1,7 @@
 //! JSON renderer: structured elements with bounding boxes, modelled on the
 //! opendataloader schema (`type`, `page number`, `bounding box [l,b,r,t]`).
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::extract::Rect;
 use crate::model::{AnalyzedDoc, Element};
@@ -29,20 +29,35 @@ fn round(v: f64) -> f64 {
 
 fn element_json(el: &Element) -> Value {
     match el {
-        Element::Heading { level, text, bbox: b, page, .. } => json!({
+        Element::Heading {
+            level,
+            text,
+            bbox: b,
+            page,
+            ..
+        } => json!({
             "type": "heading",
             "heading level": level,
             "page number": page,
             "bounding box": bbox(b),
             "content": text,
         }),
-        Element::Paragraph { text, bbox: b, page } => json!({
+        Element::Paragraph {
+            text,
+            bbox: b,
+            page,
+        } => json!({
             "type": "paragraph",
             "page number": page,
             "bounding box": bbox(b),
             "content": text,
         }),
-        Element::List { ordered, items, bbox: b, page } => json!({
+        Element::List {
+            ordered,
+            items,
+            bbox: b,
+            page,
+        } => json!({
             "type": "list",
             "numbering style": if *ordered { "ordered" } else { "unordered" },
             "page number": page,
@@ -54,7 +69,11 @@ fn element_json(el: &Element) -> Value {
                 "content": it.text,
             })).collect::<Vec<_>>(),
         }),
-        Element::Table { rows, bbox: b, page } => json!({
+        Element::Table {
+            rows,
+            bbox: b,
+            page,
+        } => json!({
             "type": "table",
             "page number": page,
             "bounding box": bbox(b),
@@ -73,7 +92,12 @@ fn element_json(el: &Element) -> Value {
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         }),
-        Element::Image { name, alt, bbox: b, page } => json!({
+        Element::Image {
+            name,
+            alt,
+            bbox: b,
+            page,
+        } => json!({
             "type": "image",
             "page number": page,
             "bounding box": bbox(b),

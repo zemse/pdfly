@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use lopdf::content::Content;
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
-use super::fonts::{build_font, Font};
+use super::fonts::{Font, build_font};
 use super::matrix::Matrix;
 use super::{ImageObj, LineSeg, Page, PdfMeta, Rect, TextRun};
 
@@ -21,7 +21,8 @@ impl super::PdfBackend for LopdfBackend {
         password: Option<&str>,
         pages: Option<&BTreeSet<usize>>,
     ) -> Result<super::Document> {
-        let mut doc = Document::load(path).with_context(|| format!("loading {}", path.display()))?;
+        let mut doc =
+            Document::load(path).with_context(|| format!("loading {}", path.display()))?;
         if doc.is_encrypted() {
             let pw = password.unwrap_or("");
             // Best-effort decryption with the supplied (or empty) password.
@@ -54,23 +55,38 @@ impl super::PdfBackend for LopdfBackend {
                 }
             }
         }
-        Ok(super::Document { meta, pages: out_pages, structure })
+        Ok(super::Document {
+            meta,
+            pages: out_pages,
+            structure,
+        })
     }
 }
 
 /// Map each page's ObjectId to its 1-indexed page number.
 fn page_number_map(doc: &Document) -> HashMap<ObjectId, usize> {
-    doc.get_pages().into_iter().map(|(n, id)| (id, n as usize)).collect()
+    doc.get_pages()
+        .into_iter()
+        .map(|(n, id)| (id, n as usize))
+        .collect()
 }
 
 /// Parse the logical structure tree (StructTreeRoot) if present.
-fn parse_structure(doc: &Document, page_index: &HashMap<ObjectId, usize>) -> Option<super::StructElem> {
+fn parse_structure(
+    doc: &Document,
+    page_index: &HashMap<ObjectId, usize>,
+) -> Option<super::StructElem> {
     let root = doc.catalog().ok()?;
     let str_ref = root.get(b"StructTreeRoot").ok()?;
     let str_root = resolve(doc, str_ref).ok()?.as_dict().ok()?.clone();
     let mut kids = Vec::new();
     collect_kids(doc, &str_root, None, page_index, &mut kids, 0);
-    Some(super::StructElem { tag: "Document".into(), alt: None, mcids: vec![], kids })
+    Some(super::StructElem {
+        tag: "Document".into(),
+        alt: None,
+        mcids: vec![],
+        kids,
+    })
 }
 
 fn collect_kids(
@@ -87,7 +103,13 @@ fn collect_kids(
     let pg = parent
         .get(b"Pg")
         .ok()
-        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+        .and_then(|o| {
+            if let Object::Reference(id) = o {
+                Some(*id)
+            } else {
+                None
+            }
+        })
         .or(inherited_pg);
     let Ok(k) = parent.get(b"K") else { return };
     let items = flatten_k(doc, k);
@@ -99,14 +121,22 @@ fn collect_kids(
                 if let Ok(Object::Name(s)) = d.get(b"S") {
                     // Child structure element.
                     let tag = String::from_utf8_lossy(s).into_owned();
-                    let alt = d
-                        .get(b"Alt")
-                        .ok()
-                        .and_then(|o| if let Object::String(b, _) = o { Some(decode_pdf_text(b)) } else { None });
+                    let alt = d.get(b"Alt").ok().and_then(|o| {
+                        if let Object::String(b, _) = o {
+                            Some(decode_pdf_text(b))
+                        } else {
+                            None
+                        }
+                    });
                     let mcids = gather_own_mcids(doc, &d, pg, page_index);
                     let mut child_kids = Vec::new();
                     collect_kids(doc, &d, pg, page_index, &mut child_kids, depth + 1);
-                    out.push(super::StructElem { tag, alt, mcids, kids: child_kids });
+                    out.push(super::StructElem {
+                        tag,
+                        alt,
+                        mcids,
+                        kids: child_kids,
+                    });
                 }
             }
             Object::Reference(id) => {
@@ -114,12 +144,21 @@ fn collect_kids(
                     if let Ok(Object::Name(s)) = d.get(b"S") {
                         let tag = String::from_utf8_lossy(s).into_owned();
                         let alt = d.get(b"Alt").ok().and_then(|o| {
-                            if let Object::String(b, _) = o { Some(decode_pdf_text(b)) } else { None }
+                            if let Object::String(b, _) = o {
+                                Some(decode_pdf_text(b))
+                            } else {
+                                None
+                            }
                         });
                         let mcids = gather_own_mcids(doc, &d, pg, page_index);
                         let mut child_kids = Vec::new();
                         collect_kids(doc, &d, pg, page_index, &mut child_kids, depth + 1);
-                        out.push(super::StructElem { tag, alt, mcids, kids: child_kids });
+                        out.push(super::StructElem {
+                            tag,
+                            alt,
+                            mcids,
+                            kids: child_kids,
+                        });
                     }
                 }
             }
@@ -140,7 +179,13 @@ fn gather_own_mcids(
     let pg = elem
         .get(b"Pg")
         .ok()
-        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+        .and_then(|o| {
+            if let Object::Reference(id) = o {
+                Some(*id)
+            } else {
+                None
+            }
+        })
         .or(inherited_pg);
     let Ok(k) = elem.get(b"K") else { return out };
     for item in flatten_k(doc, k) {
@@ -155,7 +200,13 @@ fn gather_own_mcids(
                     let mpg = d
                         .get(b"Pg")
                         .ok()
-                        .and_then(|o| if let Object::Reference(id) = o { Some(*id) } else { None })
+                        .and_then(|o| {
+                            if let Object::Reference(id) = o {
+                                Some(*id)
+                            } else {
+                                None
+                            }
+                        })
                         .or(pg);
                     if let (Ok(Object::Integer(n)), Some(p)) =
                         (d.get(b"MCID"), mpg.and_then(|id| page_index.get(&id)))
@@ -181,7 +232,10 @@ fn name_of(o: &Object) -> Option<String> {
 /// Normalize /K into a flat list of owned `Object`s (resolving arrays).
 fn flatten_k(doc: &Document, k: &Object) -> Vec<Object> {
     match k {
-        Object::Array(a) => a.iter().map(|o| resolve(doc, o).cloned().unwrap_or(Object::Null)).collect(),
+        Object::Array(a) => a
+            .iter()
+            .map(|o| resolve(doc, o).cloned().unwrap_or(Object::Null))
+            .collect(),
         Object::Reference(_) => vec![resolve(doc, k).cloned().unwrap_or(Object::Null)],
         other => vec![other.clone()],
     }
@@ -212,7 +266,13 @@ fn decode_pdf_text(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
         let units: Vec<u16> = bytes[2..]
             .chunks(2)
-            .map(|c| if c.len() == 2 { ((c[0] as u16) << 8) | c[1] as u16 } else { c[0] as u16 })
+            .map(|c| {
+                if c.len() == 2 {
+                    ((c[0] as u16) << 8) | c[1] as u16
+                } else {
+                    c[0] as u16
+                }
+            })
             .collect();
         String::from_utf16_lossy(&units)
     } else {
@@ -594,7 +654,12 @@ fn extract_mcid(a: &[Object]) -> Option<i32> {
 }
 
 fn seg(p0: (f64, f64), p1: (f64, f64)) -> LineSeg {
-    LineSeg { x0: p0.0, y0: p0.1, x1: p1.0, y1: p1.1 }
+    LineSeg {
+        x0: p0.0,
+        y0: p0.1,
+        x1: p1.0,
+        y1: p1.1,
+    }
 }
 
 fn num(a: &[Object], i: usize) -> Option<f64> {
@@ -602,7 +667,14 @@ fn num(a: &[Object], i: usize) -> Option<f64> {
 }
 
 fn matrix6(a: &[Object]) -> Option<Matrix> {
-    Some(Matrix::new(num(a, 0)?, num(a, 1)?, num(a, 2)?, num(a, 3)?, num(a, 4)?, num(a, 5)?))
+    Some(Matrix::new(
+        num(a, 0)?,
+        num(a, 1)?,
+        num(a, 2)?,
+        num(a, 3)?,
+        num(a, 4)?,
+        num(a, 5)?,
+    ))
 }
 
 fn num_chars(s: &str) -> usize {
@@ -610,7 +682,11 @@ fn num_chars(s: &str) -> usize {
 }
 
 fn cmyk_to_rgb(c: f64, m: f64, y: f64, k: f64) -> [f64; 3] {
-    [(1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k)]
+    [
+        (1.0 - c) * (1.0 - k),
+        (1.0 - m) * (1.0 - k),
+        (1.0 - y) * (1.0 - k),
+    ]
 }
 
 // ---- page resource helpers ----
@@ -641,7 +717,12 @@ fn page_media_box(doc: &Document, page_id: ObjectId) -> Rect {
     if let Some(Object::Array(arr)) = inherited(doc, page_id, b"MediaBox") {
         let v: Vec<f64> = arr.iter().filter_map(super::fonts::fnum).collect();
         if v.len() == 4 {
-            return Rect::new(v[0].min(v[2]), v[1].min(v[3]), v[0].max(v[2]), v[1].max(v[3]));
+            return Rect::new(
+                v[0].min(v[2]),
+                v[1].min(v[3]),
+                v[0].max(v[2]),
+                v[1].max(v[3]),
+            );
         }
     }
     Rect::new(0.0, 0.0, 612.0, 792.0)
@@ -668,7 +749,9 @@ fn as_dict_owned(doc: &Document, o: &Object) -> Option<Dictionary> {
 
 fn page_fonts(doc: &Document, page_id: ObjectId) -> HashMap<String, Font> {
     let mut map = HashMap::new();
-    let Some(res) = page_resources(doc, page_id) else { return map };
+    let Some(res) = page_resources(doc, page_id) else {
+        return map;
+    };
     if let Some(font_dict) = res.get(b"Font").ok().and_then(|o| as_dict_owned(doc, o)) {
         for (name, val) in font_dict.iter() {
             if let Ok(fd) = resolve(doc, val).and_then(|o| o.as_dict().map(|d| d.clone())) {
@@ -686,7 +769,9 @@ fn page_images(
 ) -> (HashMap<String, ()>, HashMap<String, super::ImageData>) {
     let mut names = HashMap::new();
     let mut data = HashMap::new();
-    let Some(res) = page_resources(doc, page_id) else { return (names, data) };
+    let Some(res) = page_resources(doc, page_id) else {
+        return (names, data);
+    };
     if let Some(xo) = res.get(b"XObject").ok().and_then(|o| as_dict_owned(doc, o)) {
         for (name, val) in xo.iter() {
             if let Ok(Object::Stream(s)) = resolve(doc, val) {
@@ -717,7 +802,11 @@ fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<super::ImageDa
     // Raw samples (Flate/none): reconstruct from colorspace, 8-bit only.
     let width = dict.get(b"Width").ok().and_then(super::fonts::fnum)? as u32;
     let height = dict.get(b"Height").ok().and_then(super::fonts::fnum)? as u32;
-    let bpc = dict.get(b"BitsPerComponent").ok().and_then(super::fonts::fnum).unwrap_or(8.0) as u32;
+    let bpc = dict
+        .get(b"BitsPerComponent")
+        .ok()
+        .and_then(super::fonts::fnum)
+        .unwrap_or(8.0) as u32;
     if bpc != 8 || width == 0 || height == 0 || width > 20000 || height > 20000 {
         return None;
     }
@@ -758,7 +847,11 @@ fn decode_image(doc: &Document, stream: &lopdf::Stream) -> Option<super::ImageDa
         }
         _ => return None, // Indexed / ICCBased / unsupported
     }
-    Some(super::ImageData::Rgba { width, height, data: rgba })
+    Some(super::ImageData::Rgba {
+        width,
+        height,
+        data: rgba,
+    })
 }
 
 fn image_filters(dict: &Dictionary) -> Vec<String> {
@@ -766,7 +859,13 @@ fn image_filters(dict: &Dictionary) -> Vec<String> {
         Ok(Object::Name(n)) => vec![String::from_utf8_lossy(n).into_owned()],
         Ok(Object::Array(a)) => a
             .iter()
-            .filter_map(|o| if let Object::Name(n) = o { Some(String::from_utf8_lossy(n).into_owned()) } else { None })
+            .filter_map(|o| {
+                if let Object::Name(n) = o {
+                    Some(String::from_utf8_lossy(n).into_owned())
+                } else {
+                    None
+                }
+            })
             .collect(),
         _ => vec![],
     }
@@ -783,7 +882,12 @@ fn color_space_name(doc: &Document, dict: &Dictionary) -> Option<String> {
                 if head == "ICCBased" {
                     if let Some(Object::Reference(id)) = a.get(1) {
                         if let Ok(s) = doc.get_object(*id).and_then(|o| o.as_stream()) {
-                            let n = s.dict.get(b"N").ok().and_then(super::fonts::fnum).unwrap_or(3.0);
+                            let n = s
+                                .dict
+                                .get(b"N")
+                                .ok()
+                                .and_then(super::fonts::fnum)
+                                .unwrap_or(3.0);
                             return Some(match n as i64 {
                                 1 => "DeviceGray".into(),
                                 4 => "DeviceCMYK".into(),

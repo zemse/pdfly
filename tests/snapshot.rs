@@ -2,17 +2,25 @@
 
 use std::path::Path;
 
-use pdf_rs::analyze::{analyze, Options};
+use pdf_rs::analyze::{Options, analyze};
 use pdf_rs::extract::{LopdfBackend, PdfBackend};
 use pdf_rs::render::{self, RenderOptions};
 
 fn corpus(name: &str) -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus")
+        .join(name)
 }
 
 fn md_with(name: &str, threads: usize) -> String {
     let doc = LopdfBackend::load(&corpus(name), None, None).unwrap();
-    let a = analyze(&doc, &Options { threads, ..Default::default() });
+    let a = analyze(
+        &doc,
+        &Options {
+            threads,
+            ..Default::default()
+        },
+    );
     render::to_markdown(&a, &RenderOptions::default())
 }
 
@@ -24,6 +32,10 @@ fn lorem_markdown_snapshot() {
 #[test]
 fn output_is_thread_independent() {
     for name in ["lorem.pdf", "2408.02509v1.pdf", "1901.03003.pdf"] {
-        assert_eq!(md_with(name, 1), md_with(name, 4), "{name}: threads must not change output");
+        assert_eq!(
+            md_with(name, 1),
+            md_with(name, 4),
+            "{name}: threads must not change output"
+        );
     }
 }

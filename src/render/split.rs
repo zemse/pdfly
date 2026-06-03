@@ -3,7 +3,7 @@
 
 use crate::model::{AnalyzedDoc, Element};
 
-use super::{md, RenderOptions};
+use super::{RenderOptions, md};
 
 #[derive(Clone, Debug)]
 pub struct SplitChapter {
@@ -13,7 +13,11 @@ pub struct SplitChapter {
 }
 
 /// Split into chapters at headings whose level <= `split_level`.
-pub fn split_markdown(doc: &AnalyzedDoc, split_level: u8, opts: &RenderOptions) -> Vec<SplitChapter> {
+pub fn split_markdown(
+    doc: &AnalyzedDoc,
+    split_level: u8,
+    opts: &RenderOptions,
+) -> Vec<SplitChapter> {
     // Partition element indices into chapters.
     let mut chapters: Vec<(Option<String>, Vec<&Element>)> = Vec::new();
     let mut current: Vec<&Element> = Vec::new();
@@ -40,7 +44,10 @@ pub fn split_markdown(doc: &AnalyzedDoc, split_level: u8, opts: &RenderOptions) 
     let mut out = Vec::new();
     for (i, (title, els)) in chapters.iter().enumerate() {
         let title = title.clone().unwrap_or_else(|| {
-            doc.meta.title.clone().unwrap_or_else(|| "Front Matter".to_string())
+            doc.meta
+                .title
+                .clone()
+                .unwrap_or_else(|| "Front Matter".to_string())
         });
         let slug = unique_slug(&slugify(&title), &mut used);
         let filename = format!("{:02}-{}.md", i + 1, slug);
@@ -48,7 +55,11 @@ pub fn split_markdown(doc: &AnalyzedDoc, split_level: u8, opts: &RenderOptions) 
         let mut content = String::new();
         md::render_elements(&owned, opts, &mut content);
         content.push('\n');
-        out.push(SplitChapter { filename, title, content });
+        out.push(SplitChapter {
+            filename,
+            title,
+            content,
+        });
     }
     out
 }

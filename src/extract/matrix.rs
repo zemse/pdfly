@@ -18,7 +18,14 @@ pub struct Matrix {
 
 impl Matrix {
     pub const fn identity() -> Self {
-        Matrix { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 }
+        Matrix {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
     }
 
     pub fn new(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Self {
@@ -26,7 +33,14 @@ impl Matrix {
     }
 
     pub fn translation(x: f64, y: f64) -> Self {
-        Matrix { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: x, f: y }
+        Matrix {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: x,
+            f: y,
+        }
     }
 
     /// `self * other` (apply self first, then other).
@@ -43,7 +57,10 @@ impl Matrix {
 
     /// Transform a point.
     pub fn apply(&self, x: f64, y: f64) -> (f64, f64) {
-        (self.a * x + self.c * y + self.e, self.b * x + self.d * y + self.f)
+        (
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
+        )
     }
 
     /// Approximate uniform scale factor on the y axis (for font size in user space).

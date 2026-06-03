@@ -50,14 +50,26 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
     let n_cols = xs.len() - 1;
 
     let mut rows: Vec<Vec<Cell>> = (0..n_rows)
-        .map(|_| (0..n_cols).map(|_| Cell { col_span: 1, row_span: 1, ..Default::default() }).collect())
+        .map(|_| {
+            (0..n_cols)
+                .map(|_| Cell {
+                    col_span: 1,
+                    row_span: 1,
+                    ..Default::default()
+                })
+                .collect()
+        })
         .collect();
 
     let mut consumed = Vec::new();
     let mut any_text = false;
     for (li, line) in text_lines.iter().enumerate() {
         let (cx, cy) = (line.bbox.center_x(), line.bbox.center_y());
-        if cx < grid_box.left - TOL || cx > grid_box.right + TOL || cy < grid_box.bottom - TOL || cy > grid_box.top + TOL {
+        if cx < grid_box.left - TOL
+            || cx > grid_box.right + TOL
+            || cy < grid_box.bottom - TOL
+            || cy > grid_box.top + TOL
+        {
             continue;
         }
         // Find row (top-down) and column.
@@ -103,12 +115,16 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
     let has_left = |r: usize, c: usize| -> bool {
         let (lo, hi) = (ys_desc[r + 1], ys_desc[r]);
         let need = (hi - lo) * 0.5;
-        v_segs.iter().any(|&(x, y0, y1)| (x - xs[c]).abs() <= TOL && (y1.min(hi) - y0.max(lo)) >= need)
+        v_segs
+            .iter()
+            .any(|&(x, y0, y1)| (x - xs[c]).abs() <= TOL && (y1.min(hi) - y0.max(lo)) >= need)
     };
     let has_top = |r: usize, c: usize| -> bool {
         let (lo, hi) = (xs[c], xs[c + 1]);
         let need = (hi - lo) * 0.5;
-        h_segs.iter().any(|&(y, x0, x1)| (y - ys_desc[r]).abs() <= TOL && (x1.min(hi) - x0.max(lo)) >= need)
+        h_segs
+            .iter()
+            .any(|&(y, x0, x1)| (y - ys_desc[r]).abs() <= TOL && (x1.min(hi) - x0.max(lo)) >= need)
     };
 
     let mut covered = vec![vec![false; n_cols]; n_rows];
@@ -164,9 +180,16 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
     // Require a real grid: >=2 rows and >=2 cols actually containing text,
     // and a decent fill, else treat as ordinary text (avoids fabricating
     // huge empty tables from stray rules / backgrounds).
-    let filled = rows.iter().flatten().filter(|c| !c.text.trim().is_empty()).count();
+    let filled = rows
+        .iter()
+        .flatten()
+        .filter(|c| !c.text.trim().is_empty())
+        .count();
     let cols_with_text = (0..n_cols)
-        .filter(|&c| rows.iter().any(|r| r.get(c).map(|x| !x.text.trim().is_empty()).unwrap_or(false)))
+        .filter(|&c| {
+            rows.iter()
+                .any(|r| r.get(c).map(|x| !x.text.trim().is_empty()).unwrap_or(false))
+        })
         .count();
     // Genuinely tabular: at least two rows that each have >=2 filled cells, and
     // a non-trivial fill ratio (rejects sparse layout/figure grids).
@@ -179,7 +202,13 @@ pub fn detect(lines: &[LineSeg], text_lines: &[Line]) -> (Vec<DetectedTable>, Ve
         return (vec![], vec![]);
     }
 
-    (vec![DetectedTable { bbox: grid_box, rows }], consumed)
+    (
+        vec![DetectedTable {
+            bbox: grid_box,
+            rows,
+        }],
+        consumed,
+    )
 }
 
 #[cfg(test)]
@@ -187,10 +216,20 @@ mod tests {
     use super::*;
 
     fn hline(y: f64, x0: f64, x1: f64) -> LineSeg {
-        LineSeg { x0, y0: y, x1, y1: y }
+        LineSeg {
+            x0,
+            y0: y,
+            x1,
+            y1: y,
+        }
     }
     fn vline(x: f64, y0: f64, y1: f64) -> LineSeg {
-        LineSeg { x0: x, y0, x1: x, y1 }
+        LineSeg {
+            x0: x,
+            y0,
+            x1: x,
+            y1,
+        }
     }
     fn line(text: &str, x: f64, y: f64) -> Line {
         Line {
@@ -273,7 +312,11 @@ pub fn detect_cluster(text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
     // Group line indices into rows by baseline.
     let mut idx: Vec<usize> = (0..text_lines.len()).collect();
     idx.sort_by(|&a, &b| {
-        text_lines[b].bbox.center_y().partial_cmp(&text_lines[a].bbox.center_y()).unwrap()
+        text_lines[b]
+            .bbox
+            .center_y()
+            .partial_cmp(&text_lines[a].bbox.center_y())
+            .unwrap()
     });
     let mut rows: Vec<Vec<usize>> = Vec::new();
     let mut cur: Vec<usize> = Vec::new();
@@ -314,16 +357,24 @@ pub fn detect_cluster(text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
         }
         if block.len() >= 3 {
             // Column starts = clustered left edges across the block.
-            let mut lefts: Vec<f64> =
-                block.iter().flat_map(|&br| rows[br].iter().map(|&li| text_lines[li].bbox.left)).collect();
+            let mut lefts: Vec<f64> = block
+                .iter()
+                .flat_map(|&br| rows[br].iter().map(|&li| text_lines[li].bbox.left))
+                .collect();
             let cols = cluster_with(&mut lefts, 12.0);
             if cols.len() >= 2 {
                 let n_cols = cols.len();
                 let mut out_rows: Vec<Vec<Cell>> = Vec::new();
                 let mut bbox = Rect::empty();
+                let mut block_consumed: Vec<usize> = Vec::new();
                 for &br in &block {
-                    let mut cells: Vec<Cell> =
-                        (0..n_cols).map(|_| Cell { col_span: 1, row_span: 1, ..Default::default() }).collect();
+                    let mut cells: Vec<Cell> = (0..n_cols)
+                        .map(|_| Cell {
+                            col_span: 1,
+                            row_span: 1,
+                            ..Default::default()
+                        })
+                        .collect();
                     for &li in &rows[br] {
                         let l = &text_lines[li];
                         // nearest column by left edge
@@ -331,7 +382,10 @@ pub fn detect_cluster(text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
                             .iter()
                             .enumerate()
                             .min_by(|a, b| {
-                                (a.1 - l.bbox.left).abs().partial_cmp(&(b.1 - l.bbox.left).abs()).unwrap()
+                                (a.1 - l.bbox.left)
+                                    .abs()
+                                    .partial_cmp(&(b.1 - l.bbox.left).abs())
+                                    .unwrap()
                             })
                             .map(|(k, _)| k)
                             .unwrap_or(0);
@@ -340,16 +394,103 @@ pub fn detect_cluster(text_lines: &[Line]) -> (Vec<DetectedTable>, Vec<usize>) {
                         }
                         cells[ci].text.push_str(l.text.trim());
                         bbox.union(&l.bbox);
-                        consumed.push(li);
+                        block_consumed.push(li);
                     }
                     out_rows.push(cells);
                 }
-                tables.push(DetectedTable { bbox, rows: out_rows });
+                // Precision guard: a borderless block is only a table if it is
+                // genuinely grid-like. Charts (scattered numbers) and prose with
+                // accidental column alignment otherwise get fabricated into
+                // tables, swallowing headings and wrecking reading order. Require
+                // a dense, regular grid: most cells filled, and at least two
+                // columns that are populated in a majority of rows.
+                if is_grid_like(&out_rows, n_cols) {
+                    consumed.extend_from_slice(&block_consumed);
+                    tables.push(DetectedTable {
+                        bbox,
+                        rows: out_rows,
+                    });
+                }
             }
         }
         r = j.max(r + 1);
     }
     (tables, consumed)
+}
+
+/// Decide whether an assembled borderless block is a real table rather than a
+/// chart or accidentally-aligned prose. Mirrors the density/regularity checks
+/// the ruled-grid path applies, tuned for whitespace-aligned grids.
+fn is_grid_like(out_rows: &[Vec<Cell>], n_cols: usize) -> bool {
+    if out_rows.len() < 3 || n_cols < 2 {
+        return false;
+    }
+    let n_rows = out_rows.len();
+    let filled = out_rows
+        .iter()
+        .flatten()
+        .filter(|c| !c.text.trim().is_empty())
+        .count();
+    let fill_ratio = filled as f64 / (n_rows * n_cols).max(1) as f64;
+    // Rows that look tabular (>=2 populated cells).
+    let rows_multi = out_rows
+        .iter()
+        .filter(|r| r.iter().filter(|c| !c.text.trim().is_empty()).count() >= 2)
+        .count();
+    // Columns populated in a majority of rows — a real table keeps the same
+    // columns filled down the block; a chart populates a column in just one or
+    // two rows.
+    let strong_cols = (0..n_cols)
+        .filter(|&c| {
+            let cnt = out_rows
+                .iter()
+                .filter(|r| !r[c].text.trim().is_empty())
+                .count();
+            cnt * 2 >= n_rows
+        })
+        .count();
+    if !(filled >= 6 && rows_multi * 2 >= n_rows && strong_cols >= 2 && fill_ratio >= 0.5) {
+        return false;
+    }
+    // Cell-content check: real table cells are short tokens/values; multi-column
+    // running prose (the dominant borderless false positive) produces cells that
+    // are long sentence fragments. Reject blocks whose typical cell reads like
+    // prose. Measured split on the benchmark: true tables ~1.8 words / ~5 chars
+    // median per cell; two-column prose ~3.7-7 words / 18-48 chars.
+    let mut lens: Vec<usize> = Vec::new();
+    let mut total_words = 0usize;
+    for cell in out_rows.iter().flatten() {
+        let t = cell.text.trim();
+        if t.is_empty() {
+            continue;
+        }
+        lens.push(t.chars().count());
+        total_words += t.split_whitespace().count();
+    }
+    lens.sort_unstable();
+    let median_chars = lens[lens.len() / 2];
+    let mean_words = total_words as f64 / lens.len() as f64;
+    if median_chars > 12 || mean_words > 3.0 {
+        return false;
+    }
+    // Per-column prose check: tables of contents / indexes pair a long-title
+    // column with a short page-number column, so the overall median stays low.
+    // Reject when any single column is itself prose-like (its own cells are long).
+    let col_is_prose = (0..n_cols).any(|c| {
+        let mut cl: Vec<usize> = out_rows
+            .iter()
+            .filter_map(|r| {
+                let t = r[c].text.trim();
+                (!t.is_empty()).then(|| t.chars().count())
+            })
+            .collect();
+        if cl.len() < 3 {
+            return false;
+        }
+        cl.sort_unstable();
+        cl[cl.len() / 2] > 16
+    });
+    !col_is_prose
 }
 
 /// Sort + merge near-equal coordinates into representative grid lines.

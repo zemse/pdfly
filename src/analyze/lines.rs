@@ -11,7 +11,9 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
     // Sort by descending center-y, then left.
     let mut idx: Vec<usize> = (0..runs.len()).collect();
     idx.sort_by(|&a, &b| {
-        runs[b].bbox.center_y()
+        runs[b]
+            .bbox
+            .center_y()
             .partial_cmp(&runs[a].bbox.center_y())
             .unwrap()
             .then(runs[a].bbox.left.partial_cmp(&runs[b].bbox.left).unwrap())

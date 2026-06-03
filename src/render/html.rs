@@ -6,7 +6,10 @@ pub fn to_html(doc: &AnalyzedDoc) -> String {
     let title = doc.meta.title.clone().unwrap_or_default();
     let mut out = String::new();
     out.push_str("<!DOCTYPE html>\n<html lang=\"und\">\n<head>\n<meta charset=\"utf-8\">\n");
-    out.push_str(&format!("<title>{}</title>\n</head>\n<body>\n", esc(&title)));
+    out.push_str(&format!(
+        "<title>{}</title>\n</head>\n<body>\n",
+        esc(&title)
+    ));
     for el in &doc.elements {
         match el {
             Element::Heading { level, text, .. } => {
@@ -26,7 +29,11 @@ pub fn to_html(doc: &AnalyzedDoc) -> String {
             }
             Element::Table { rows, .. } => render_table(rows, &mut out),
             Element::Image { name, alt, .. } => {
-                out.push_str(&format!("<img src=\"{}\" alt=\"{}\">\n", esc(name), esc(alt)));
+                out.push_str(&format!(
+                    "<img src=\"{}\" alt=\"{}\">\n",
+                    esc(name),
+                    esc(alt)
+                ));
             }
         }
     }
@@ -50,7 +57,10 @@ fn render_table(rows: &[Vec<Cell>], out: &mut String) {
             if cell.row_span > 1 {
                 attrs.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
             }
-            out.push_str(&format!("<{tag}{attrs}>{}</{tag}>\n", esc(cell.text.trim())));
+            out.push_str(&format!(
+                "<{tag}{attrs}>{}</{tag}>\n",
+                esc(cell.text.trim())
+            ));
         }
         out.push_str("</tr>\n");
     }
@@ -58,5 +68,8 @@ fn render_table(rows: &[Vec<Cell>], out: &mut String) {
 }
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }

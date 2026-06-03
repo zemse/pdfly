@@ -135,7 +135,10 @@ fn render_table_html(rows: &[Vec<Cell>], out: &mut String) {
             if cell.row_span > 1 {
                 attrs.push_str(&format!(" rowspan=\"{}\"", cell.row_span));
             }
-            out.push_str(&format!("    <{tag}{attrs}>{}</{tag}>\n", html_escape(cell.text.trim())));
+            out.push_str(&format!(
+                "    <{tag}{attrs}>{}</{tag}>\n",
+                html_escape(cell.text.trim())
+            ));
         }
         out.push_str("  </tr>\n");
     }
@@ -143,7 +146,9 @@ fn render_table_html(rows: &[Vec<Cell>], out: &mut String) {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn escape_inline(s: &str) -> String {
@@ -151,5 +156,7 @@ fn escape_inline(s: &str) -> String {
 }
 
 fn escape_cell(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('|', "\\|").replace('\n', " ")
+    s.replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\n', " ")
 }

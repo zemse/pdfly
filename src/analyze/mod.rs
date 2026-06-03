@@ -51,8 +51,11 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
     // Tagged-PDF path: trust the author's structure tree when asked and available.
     if opts.use_struct_tree {
         if let Some(elements) = structured::structured_elements(doc) {
-            let mut analyzed =
-                AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements };
+            let mut analyzed = AnalyzedDoc {
+                meta: doc.meta.clone(),
+                num_pages: doc.pages.len(),
+                elements,
+            };
             if opts.sanitize {
                 sanitize::sanitize_doc(&mut analyzed);
             }
@@ -147,9 +150,7 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
         let mut pending_lines: Vec<usize> = Vec::new();
         let mut page_elements: Vec<Element> = Vec::new();
 
-        let flush = |pending: &mut Vec<usize>,
-                     out: &mut Vec<Element>,
-                     hsizes: &mut Vec<f64>| {
+        let flush = |pending: &mut Vec<usize>, out: &mut Vec<Element>, hsizes: &mut Vec<f64>| {
             if pending.is_empty() {
                 return;
             }
@@ -198,7 +199,11 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
 
     assign_heading_levels(&mut elements, &mut heading_sizes);
 
-    let mut analyzed = AnalyzedDoc { meta: doc.meta.clone(), num_pages: doc.pages.len(), elements };
+    let mut analyzed = AnalyzedDoc {
+        meta: doc.meta.clone(),
+        num_pages: doc.pages.len(),
+        elements,
+    };
     if opts.sanitize {
         sanitize::sanitize_doc(&mut analyzed);
     }
@@ -319,8 +324,41 @@ fn classify_block(
     while i < lines.len() {
         let line = lines[i];
 
+        let marker = list_marker(&line.text);
+
+        // Heading? Larger-than-body font, or bold + short. Guard against bold
+        // running text: a bold line only counts as a heading if it's short and
+        // doesn't read like a sentence (no terminal period, not too long).
+        //
+        // This check runs *before* list detection so that numbered section
+        // headings ("4. Entropy", "2. General Profile") — which begin with a
+        // list marker but are typeset like headings — are not swallowed as
+        // single-item ordered lists. A markered line is only promoted when it
+        // is not part of a consecutive list run (the next line isn't also a
+        // marker), which protects genuine short/bold numbered lists.
+        let chars = line.text.chars().count();
+        let trimmed = line.text.trim();
+        let is_larger = line.font_size >= body_size * 1.15;
+        let sentence_like = chars > 60 || trimmed.ends_with('.') || trimmed.ends_with(';');
+        let is_bold_short =
+            line.bold && line.font_size >= body_size * 0.95 && chars <= 60 && !sentence_like;
+        let next_is_marker = i + 1 < lines.len() && list_marker(&lines[i + 1].text).is_some();
+        let heading_ok = marker.is_none() || !next_is_marker;
+        if (is_larger || is_bold_short) && !trimmed.is_empty() && heading_ok {
+            heading_sizes.push(line.font_size);
+            out.push(Element::Heading {
+                level: 0, // filled in globally
+                size: line.font_size,
+                text: line.text.trim().to_string(),
+                bbox: line.bbox,
+                page,
+            });
+            i += 1;
+            continue;
+        }
+
         // List item?
-        if let Some((ordered, _marker)) = list_marker(&line.text) {
+        if let Some((ordered, _marker)) = marker {
             // Gather consecutive list items.
             let mut raw: Vec<(String, Rect, bool)> = Vec::new();
             let mut bbox = Rect::empty();
@@ -343,31 +381,19 @@ fn classify_block(
                 .map(|(text, b, _)| {
                     let indent = (b.left - min_left).max(0.0);
                     let level = (indent / 18.0).round() as usize; // ~1 level per 18pt
-                    ListItem { text, bbox: b, level: level.min(5) }
+                    ListItem {
+                        text,
+                        bbox: b,
+                        level: level.min(5),
+                    }
                 })
                 .collect();
-            out.push(Element::List { ordered: ord, items, bbox, page });
-            continue;
-        }
-
-        // Heading? Larger-than-body font, or bold + short. Guard against bold
-        // running text: a bold line only counts as a heading if it's short and
-        // doesn't read like a sentence (no terminal period, not too long).
-        let chars = line.text.chars().count();
-        let trimmed = line.text.trim();
-        let is_larger = line.font_size >= body_size * 1.15;
-        let sentence_like = chars > 60 || trimmed.ends_with('.') || trimmed.ends_with(';');
-        let is_bold_short = line.bold && line.font_size >= body_size * 0.95 && chars <= 60 && !sentence_like;
-        if (is_larger || is_bold_short) && !trimmed.is_empty() {
-            heading_sizes.push(line.font_size);
-            out.push(Element::Heading {
-                level: 0, // filled in globally
-                size: line.font_size,
-                text: line.text.trim().to_string(),
-                bbox: line.bbox,
+            out.push(Element::List {
+                ordered: ord,
+                items,
+                bbox,
                 page,
             });
-            i += 1;
             continue;
         }
 
@@ -380,7 +406,8 @@ fn classify_block(
             if list_marker(&next.text).is_some() {
                 break;
             }
-            if next.font_size >= body_size * 1.15 || (next.bold && next.text.chars().count() <= 80) {
+            if next.font_size >= body_size * 1.15 || (next.bold && next.text.chars().count() <= 80)
+            {
                 break;
             }
             let gap = bbox.bottom - next.bbox.top;
@@ -395,7 +422,11 @@ fn classify_block(
             bbox.union(&next.bbox);
             j += 1;
         }
-        out.push(Element::Paragraph { text: normalize_ws(&text), bbox, page });
+        out.push(Element::Paragraph {
+            text: normalize_ws(&text),
+            bbox,
+            page,
+        });
         i = j;
     }
 }
@@ -458,7 +489,11 @@ fn strip_marker(text: &str) -> String {
             }
         }
         // advance one more char index to get end of marker
-        let rest = if let Some((b, _)) = chars.next() { &t[b..] } else { t.get(byte + 1..).unwrap_or("") };
+        let rest = if let Some((b, _)) = chars.next() {
+            &t[b..]
+        } else {
+            t.get(byte + 1..).unwrap_or("")
+        };
         return rest.trim_start().to_string();
     }
     t.to_string()
@@ -519,7 +554,10 @@ fn find_caption(elements: &[Element], img: &Rect) -> Option<usize> {
             let above = (bbox.bottom - img.top).abs() < img_h * 0.8 && bbox.bottom >= img.top - 2.0;
             let caption_word = {
                 let l = text.to_lowercase();
-                l.starts_with("fig") || l.starts_with("table") || l.starts_with("image") || l.starts_with("photo")
+                l.starts_with("fig")
+                    || l.starts_with("table")
+                    || l.starts_with("image")
+                    || l.starts_with("photo")
             };
             if (below || above) && (caption_word || chars <= 90) {
                 return Some(i);

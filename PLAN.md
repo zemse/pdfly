@@ -13,9 +13,13 @@ what shipped. This file lists only what's left.
   spanners as band separators fragments full-width code listings inside two-column papers
   (`2408.02509v1`), and it gave no clear net win on the corpus. Needs validation data — see threshold
   tuning below — before re-attempting.)*
-- [ ] **Threshold tuning** — pull `opendataloader-bench` (200 PDFs w/ ground truth) and tune the
-  heading/list/table heuristics against it. (Large download; not done here.) Also unblocks
-  validating the multi-column rework above.
+- [ ] **Threshold tuning (in progress)** — `opendataloader-bench` (200 PDFs w/ ground truth) is
+  cloned at `../opendataloader-bench`; scoring harness wired up (see memory `opendataloader-bench-setup`).
+  Baseline overall 0.717 → **0.766** so far (NID 0.847→0.860, TEDS 0.309→0.378, MHS 0.501→0.635) via:
+  numbered section headings no longer eaten as lists; borderless table detection on by default with
+  precision guards (fill/regularity + prose-cell + ToC rejection). Remaining: TEDS still 0.378 (12 of
+  42 table docs still score 0 — borderless tables not yet detected), MHS 0.635 (< 0.74 threshold).
+  Also unblocks validating the multi-column rework above.
 
 ## Blocked in this environment (need external assets)
 

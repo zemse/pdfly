@@ -16,10 +16,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use lopdf::content::{Content, Operation};
-use lopdf::{dictionary, Document, Object, ObjectId};
+use lopdf::{Document, Object, ObjectId, dictionary};
 
-use crate::extract::matrix::Matrix;
 use crate::extract::Rect;
+use crate::extract::matrix::Matrix;
 use crate::model::{AnalyzedDoc, Element};
 
 /// Structure tag for an element.
@@ -56,13 +56,25 @@ pub fn write_tagged_pdf(
     let mut elem_mcids: BTreeMap<usize, (usize, Vec<i32>)> = BTreeMap::new();
 
     for (&num, &page_id) in &pages {
-        let Some(elem_idxs) = by_page.get(&(num as usize)) else { continue };
-        let Ok(content_data) = doc.get_page_content(page_id) else { continue };
-        let Ok(content) = Content::decode(&content_data) else { continue };
+        let Some(elem_idxs) = by_page.get(&(num as usize)) else {
+            continue;
+        };
+        let Ok(content_data) = doc.get_page_content(page_id) else {
+            continue;
+        };
+        let Ok(content) = Content::decode(&content_data) else {
+            continue;
+        };
 
         let elem_boxes: Vec<(usize, Rect, String)> = elem_idxs
             .iter()
-            .map(|&i| (i, analyzed.elements[i].bbox(), tag_of(&analyzed.elements[i])))
+            .map(|&i| {
+                (
+                    i,
+                    analyzed.elements[i].bbox(),
+                    tag_of(&analyzed.elements[i]),
+                )
+            })
             .collect();
 
         let (new_ops, marks) = mark_operations(&content.operations, &elem_boxes);
@@ -71,7 +83,9 @@ pub fn write_tagged_pdf(
         }
         // Record MCIDs per element (assigned in mark_operations via the closure).
         // (mark_operations writes into `assigned` below.)
-        let new_content = Content { operations: new_ops };
+        let new_content = Content {
+            operations: new_ops,
+        };
         if let Ok(bytes) = new_content.encode() {
             // Replace the page content with a single new stream.
             let sid = doc.add_object(Object::Stream(lopdf::Stream::new(dictionary! {}, bytes)));
@@ -82,19 +96,26 @@ pub fn write_tagged_pdf(
         }
         // Pull the per-element MCIDs computed during marking.
         for (idx, mcid) in MARK_SCRATCH.with(|s| s.borrow_mut().drain(..).collect::<Vec<_>>()) {
-            elem_mcids.entry(idx).or_insert_with(|| (num as usize, Vec::new())).1.push(mcid);
+            elem_mcids
+                .entry(idx)
+                .or_insert_with(|| (num as usize, Vec::new()))
+                .1
+                .push(mcid);
         }
     }
 
     // Build the structure tree referencing the MCIDs.
     let root_id = doc.new_object_id();
-    let page_ref = |n: usize| -> Option<Object> { pages.get(&(n as u32)).map(|id| Object::Reference(*id)) };
+    let page_ref =
+        |n: usize| -> Option<Object> { pages.get(&(n as u32)).map(|id| Object::Reference(*id)) };
     let mut kids: Vec<Object> = Vec::new();
     // page -> (mcid -> owning StructElem id), for the /ParentTree reverse map.
     let mut parent_map: BTreeMap<usize, BTreeMap<i32, ObjectId>> = BTreeMap::new();
 
     for (i, el) in analyzed.elements.iter().enumerate() {
-        let Some((pg, mcids)) = elem_mcids.get(&i) else { continue };
+        let Some((pg, mcids)) = elem_mcids.get(&i) else {
+            continue;
+        };
         if mcids.is_empty() {
             continue;
         }
@@ -127,12 +148,18 @@ pub fn write_tagged_pdf(
     for (pg, slot) in &parent_map {
         let max_mcid = slot.keys().copied().max().unwrap_or(0);
         let refs: Vec<Object> = (0..=max_mcid)
-            .map(|m| slot.get(&m).map(|id| Object::Reference(*id)).unwrap_or(Object::Null))
+            .map(|m| {
+                slot.get(&m)
+                    .map(|id| Object::Reference(*id))
+                    .unwrap_or(Object::Null)
+            })
             .collect();
         nums.push(Object::Integer(*pg as i64));
         nums.push(Object::Reference(doc.add_object(Object::Array(refs))));
     }
-    let parent_tree = doc.add_object(Object::Dictionary(dictionary! { "Nums" => Object::Array(nums) }));
+    let parent_tree = doc.add_object(Object::Dictionary(
+        dictionary! { "Nums" => Object::Array(nums) },
+    ));
     let next_key = parent_map.keys().copied().max().map(|k| k + 1).unwrap_or(0);
 
     doc.set_object(
@@ -151,13 +178,20 @@ pub fn write_tagged_pdf(
         .title
         .clone()
         .filter(|t| !t.trim().is_empty())
-        .or_else(|| src.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()));
+        .or_else(|| {
+            src.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        });
     if let Some(Object::Reference(cid)) = doc.trailer.get(b"Root").ok().cloned() {
         if let Ok(cat) = doc.get_dictionary_mut(cid) {
             cat.set("StructTreeRoot", Object::Reference(root_id));
             cat.set("MarkInfo", dictionary! { "Marked" => true });
             cat.set("Lang", Object::string_literal("en"));
-            cat.set("ViewerPreferences", dictionary! { "DisplayDocTitle" => true });
+            cat.set(
+                "ViewerPreferences",
+                dictionary! { "DisplayDocTitle" => true },
+            );
         }
     }
     // Ensure a document title exists (PDF/UA needs one shown via DisplayDocTitle).
@@ -167,7 +201,8 @@ pub fn write_tagged_pdf(
                 info.set("Title", Object::string_literal(t.as_str()));
             }
         } else {
-            let info = doc.add_object(dictionary! { "Title" => Object::string_literal(t.as_str()) });
+            let info =
+                doc.add_object(dictionary! { "Title" => Object::string_literal(t.as_str()) });
             doc.trailer.set("Info", Object::Reference(info));
         }
     }
@@ -203,7 +238,14 @@ fn mark_operations(ops: &[Operation], elems: &[(usize, Rect, String)]) -> (Vec<O
         })
     };
     let mat = |a: &[Object]| -> Option<Matrix> {
-        Some(Matrix::new(num(a, 0)?, num(a, 1)?, num(a, 2)?, num(a, 3)?, num(a, 4)?, num(a, 5)?))
+        Some(Matrix::new(
+            num(a, 0)?,
+            num(a, 1)?,
+            num(a, 2)?,
+            num(a, 3)?,
+            num(a, 4)?,
+            num(a, 5)?,
+        ))
     };
 
     for op in ops {

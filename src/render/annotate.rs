@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use lopdf::{dictionary, Document, Object, Stream};
+use lopdf::{Document, Object, Stream, dictionary};
 
 use crate::model::{AnalyzedDoc, Element};
 
@@ -38,7 +38,9 @@ pub fn write_annotated(
 
     let pages: BTreeMap<u32, lopdf::ObjectId> = doc.get_pages();
     for (num, page_id) in pages {
-        let Some(els) = by_page.get(&(num as usize)) else { continue };
+        let Some(els) = by_page.get(&(num as usize)) else {
+            continue;
+        };
         let mut content = String::from("q\n");
         for el in els {
             let b = el.bbox();

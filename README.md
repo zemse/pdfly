@@ -105,8 +105,8 @@ veraPDF's `wcag-algorithms`.
 - Type1 (`FontFile`) subset fonts with non-standard built-in encodings and no
   `/ToUnicode` may still mis-decode (embedded TrueType/CFF and standard glyph
   names now decode).
-- Bordered table detection can over-trigger on ruled figures; borderless
-  detection (`--table-method cluster`) is conservative and opt-in.
+- Borderless (column-aligned) table detection is on by default; pass
+  `--table-method ruled` to restrict detection to ruled-border tables only.
 - `--tagged-pdf` writes marked content + a structure tree (round-trips via
   `--use-struct-tree`) but does not yet emit a `/ParentTree` or run formal
   PDF/UA conformance validation.

@@ -58,21 +58,30 @@ pub fn augment(doc: &mut Document) -> anyhow::Result<usize> {
 
     let mut added = 0usize;
     for page in &mut doc.pages {
-        let Some(name) = page_needs_ocr(page) else { continue };
-        let Some(data) = page.image_data.get(&name).cloned() else { continue };
+        let Some(name) = page_needs_ocr(page) else {
+            continue;
+        };
+        let Some(data) = page.image_data.get(&name).cloned() else {
+            continue;
+        };
         // Decode to RGB pixels.
         let rgb = match data {
-            ImageData::Rgba { width, height, data } => {
-                image::RgbaImage::from_raw(width, height, data).map(|i| {
-                    let d = image::DynamicImage::ImageRgba8(i).to_rgb8();
-                    (d.width(), d.height(), d.into_raw())
-                })
-            }
-            ImageData::Jpeg(bytes) => image::load_from_memory(&bytes)
-                .ok()
-                .map(|i| { let d = i.to_rgb8(); (d.width(), d.height(), d.into_raw()) }),
+            ImageData::Rgba {
+                width,
+                height,
+                data,
+            } => image::RgbaImage::from_raw(width, height, data).map(|i| {
+                let d = image::DynamicImage::ImageRgba8(i).to_rgb8();
+                (d.width(), d.height(), d.into_raw())
+            }),
+            ImageData::Jpeg(bytes) => image::load_from_memory(&bytes).ok().map(|i| {
+                let d = i.to_rgb8();
+                (d.width(), d.height(), d.into_raw())
+            }),
         };
-        let Some((iw, ih, pixels)) = rgb else { continue };
+        let Some((iw, ih, pixels)) = rgb else {
+            continue;
+        };
 
         let src = ImageSource::from_bytes(&pixels, (iw, ih))?;
         let input = engine.prepare_input(src)?;

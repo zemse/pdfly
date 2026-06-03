@@ -39,11 +39,35 @@ pub struct Cell {
 #[derive(Clone, Debug)]
 pub enum Element {
     /// `size` is the source font size, used to rank levels; not rendered.
-    Heading { level: u8, size: f64, text: String, bbox: Rect, page: usize },
-    Paragraph { text: String, bbox: Rect, page: usize },
-    List { ordered: bool, items: Vec<ListItem>, bbox: Rect, page: usize },
-    Table { rows: Vec<Vec<Cell>>, bbox: Rect, page: usize },
-    Image { name: String, alt: String, bbox: Rect, page: usize },
+    Heading {
+        level: u8,
+        size: f64,
+        text: String,
+        bbox: Rect,
+        page: usize,
+    },
+    Paragraph {
+        text: String,
+        bbox: Rect,
+        page: usize,
+    },
+    List {
+        ordered: bool,
+        items: Vec<ListItem>,
+        bbox: Rect,
+        page: usize,
+    },
+    Table {
+        rows: Vec<Vec<Cell>>,
+        bbox: Rect,
+        page: usize,
+    },
+    Image {
+        name: String,
+        alt: String,
+        bbox: Rect,
+        page: usize,
+    },
 }
 
 impl Element {

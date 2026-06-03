@@ -22,11 +22,21 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(left: f64, bottom: f64, right: f64, top: f64) -> Self {
-        Rect { left, bottom, right, top }
+        Rect {
+            left,
+            bottom,
+            right,
+            top,
+        }
     }
 
     pub fn empty() -> Self {
-        Rect { left: f64::MAX, bottom: f64::MAX, right: f64::MIN, top: f64::MIN }
+        Rect {
+            left: f64::MAX,
+            bottom: f64::MAX,
+            right: f64::MIN,
+            top: f64::MIN,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -103,7 +113,11 @@ pub enum ImageData {
     /// JPEG bytes (DCTDecode passthrough).
     Jpeg(Vec<u8>),
     /// Raw RGBA8 pixels.
-    Rgba { width: u32, height: u32, data: Vec<u8> },
+    Rgba {
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    },
 }
 
 /// An axis-aligned vector line segment (for table borders / strikethrough).

@@ -53,7 +53,11 @@ fn find_vertical_gutter(boxes: &[Rect], idx: &[usize]) -> Option<f64> {
         return None;
     }
     // Column-width boxes only (exclude likely full-width spanners).
-    let narrow: Vec<&Rect> = idx.iter().map(|&i| &boxes[i]).filter(|b| b.width() < 0.6 * w).collect();
+    let narrow: Vec<&Rect> = idx
+        .iter()
+        .map(|&i| &boxes[i])
+        .filter(|b| b.width() < 0.6 * w)
+        .collect();
     if narrow.len() < 4 {
         return None;
     }
@@ -109,7 +113,11 @@ fn column_order(boxes: &[Rect], idx: &[usize], gx: f64) -> Vec<usize> {
     }
     let by_y = |v: &mut Vec<usize>| {
         v.sort_by(|&a, &b| {
-            boxes[b].top.partial_cmp(&boxes[a].top).unwrap().then(boxes[a].left.partial_cmp(&boxes[b].left).unwrap())
+            boxes[b]
+                .top
+                .partial_cmp(&boxes[a].top)
+                .unwrap()
+                .then(boxes[a].left.partial_cmp(&boxes[b].left).unwrap())
         })
     };
     by_y(&mut straddle);
@@ -174,11 +182,7 @@ fn h_overlap_ratio(a: &Rect, b: &Rect) -> f64 {
         return 0.0;
     }
     let smaller = a.width().min(b.width());
-    if smaller > 0.0 {
-        w / smaller
-    } else {
-        0.0
-    }
+    if smaller > 0.0 { w / smaller } else { 0.0 }
 }
 
 fn density_ratio(boxes: &[Rect], idx: &[usize]) -> f64 {
@@ -245,7 +249,11 @@ fn best_vertical_cut(boxes: &[Rect], idx: &[usize]) -> (f64, f64) {
             region.union(&boxes[i]);
         }
         let narrow = region.width() * NARROW_RATIO;
-        let filtered: Vec<usize> = idx.iter().copied().filter(|&i| boxes[i].width() >= narrow).collect();
+        let filtered: Vec<usize> = idx
+            .iter()
+            .copied()
+            .filter(|&i| boxes[i].width() >= narrow)
+            .collect();
         if filtered.len() >= 2 && filtered.len() < idx.len() {
             let f = vertical_cut_by_edges(boxes, &filtered);
             if f.1 > edge.1 && f.1 >= MIN_GAP {
@@ -311,7 +319,10 @@ fn split_h(boxes: &[Rect], idx: &[usize], cut_y: f64) -> Vec<Vec<usize>> {
             below.push(i);
         }
     }
-    [above, below].into_iter().filter(|g| !g.is_empty()).collect()
+    [above, below]
+        .into_iter()
+        .filter(|g| !g.is_empty())
+        .collect()
 }
 
 fn split_v(boxes: &[Rect], idx: &[usize], cut_x: f64) -> Vec<Vec<usize>> {
@@ -323,7 +334,10 @@ fn split_v(boxes: &[Rect], idx: &[usize], cut_x: f64) -> Vec<Vec<usize>> {
             right.push(i);
         }
     }
-    [left, right].into_iter().filter(|g| !g.is_empty()).collect()
+    [left, right]
+        .into_iter()
+        .filter(|g| !g.is_empty())
+        .collect()
 }
 
 fn merge_cross(boxes: &[Rect], main: Vec<usize>, cross: Vec<usize>) -> Vec<usize> {
@@ -354,7 +368,8 @@ fn merge_cross(boxes: &[Rect], main: Vec<usize>, cross: Vec<usize>) -> Vec<usize
 fn sort_y_then_x(boxes: &[Rect], idx: &[usize]) -> Vec<usize> {
     let mut v = idx.to_vec();
     v.sort_by(|&a, &b| {
-        boxes[b].top
+        boxes[b]
+            .top
             .partial_cmp(&boxes[a].top)
             .unwrap()
             .then(boxes[a].left.partial_cmp(&boxes[b].left).unwrap())
@@ -384,17 +399,21 @@ mod tests {
         // Full-width title, then a two-column body with 3 lines each. The gutter
         // detector should fire and read: title, full left column, full right column.
         let boxes = vec![
-            Rect::new(0.0, 760.0, 300.0, 790.0), // 0 title (full width)
-            Rect::new(0.0, 700.0, 140.0, 712.0), // 1 L1
-            Rect::new(0.0, 670.0, 140.0, 682.0), // 2 L2
-            Rect::new(0.0, 640.0, 140.0, 652.0), // 3 L3
+            Rect::new(0.0, 760.0, 300.0, 790.0),   // 0 title (full width)
+            Rect::new(0.0, 700.0, 140.0, 712.0),   // 1 L1
+            Rect::new(0.0, 670.0, 140.0, 682.0),   // 2 L2
+            Rect::new(0.0, 640.0, 140.0, 652.0),   // 3 L3
             Rect::new(160.0, 700.0, 300.0, 712.0), // 4 R1
             Rect::new(160.0, 670.0, 300.0, 682.0), // 5 R2
             Rect::new(160.0, 640.0, 300.0, 652.0), // 6 R3
         ];
         assert!(find_vertical_gutter(&boxes, &(0..boxes.len()).collect::<Vec<_>>()).is_some());
         let ord = order(&boxes);
-        assert_eq!(ord, vec![0, 1, 2, 3, 4, 5, 6], "title, then left column, then right column");
+        assert_eq!(
+            ord,
+            vec![0, 1, 2, 3, 4, 5, 6],
+            "title, then left column, then right column"
+        );
     }
 
     #[test]
