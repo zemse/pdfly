@@ -4,13 +4,16 @@
 //! Strategy (in order of reliability):
 //!  1. `/ToUnicode` CMap — used when present (most modern PDFs have it).
 //!  2. Simple-font `/Encoding` (WinAnsi base + `/Differences`).
-//!  3. Raw byte fallback (Latin-1-ish).
+//!  3. A Type1 (`/FontFile`) program's built-in `/Encoding`, for symbolic
+//!     fonts with a non-standard encoding and no `/ToUnicode`.
+//!  4. Raw byte fallback (Latin-1-ish).
 //!
 //! Widths come from `/Widths` (simple) or `/W`+`/DW` (Type0/CID).
 
 use std::collections::HashMap;
 
 use lopdf::{Dictionary, Document, Object};
+use regex::Regex;
 
 #[derive(Clone, Debug)]
 pub struct Font {
@@ -163,18 +166,34 @@ pub fn build_font(doc: &Document, font_dict: &Dictionary) -> Font {
                 }
             }
         }
-        let mut enc = build_simple_encoding(doc, font_dict);
-        if let Ok(fd) = font_dict.get(b"FontDescriptor") {
-            if let Ok(fd) = resolve(doc, fd).and_then(|o| o.as_dict().map(|d| d.clone())) {
-                apply_descriptor_flags_dict(&fd, &mut font);
-                // Recover code->unicode from the embedded program when there is
-                // no ToUnicode and no explicit Differences for those codes.
-                if font.to_unicode.is_none() {
-                    if let Some(prog) = font_program(doc, &fd) {
-                        if let Some(emb) = load_embedded(&prog) {
-                            for (code, ch) in emb.code_to_unicode {
-                                enc.entry(code).or_insert(ch);
-                            }
+        let descriptor = font_dict
+            .get(b"FontDescriptor")
+            .ok()
+            .and_then(|fd| resolve(doc, fd).ok())
+            .and_then(|o| o.as_dict().ok().cloned());
+
+        // A Type1 (`/FontFile`) program carries its own built-in `/Encoding`
+        // (code -> glyph name) in its clear-text header. When the PDF doesn't
+        // pin a base encoding by name, that built-in encoding is authoritative
+        // — needed for symbolic Type1 fonts with a non-standard encoding and no
+        // `/ToUnicode`.
+        let type1_builtin = descriptor
+            .as_ref()
+            .and_then(|fd| type1_font_program(doc, fd))
+            .map(|prog| parse_type1_builtin_encoding(&prog))
+            .filter(|m| !m.is_empty());
+
+        let mut enc = build_simple_encoding(doc, font_dict, type1_builtin.as_ref());
+
+        if let Some(fd) = &descriptor {
+            apply_descriptor_flags_dict(fd, &mut font);
+            // Recover code->unicode from an embedded TrueType/CFF program when
+            // there is no ToUnicode (fills remaining gaps only).
+            if font.to_unicode.is_none() {
+                if let Some(prog) = font_program(doc, fd) {
+                    if let Some(emb) = load_embedded(&prog) {
+                        for (code, ch) in emb.code_to_unicode {
+                            enc.entry(code).or_insert(ch);
                         }
                     }
                 }
@@ -320,35 +339,102 @@ fn parse_cid_widths(arr: &[Object], out: &mut HashMap<u32, f64>) {
     }
 }
 
-/// Build byte->char map for a simple font from its `/Encoding`.
-fn build_simple_encoding(doc: &Document, font_dict: &Dictionary) -> HashMap<u8, char> {
+/// Build byte->char map for a simple font from its `/Encoding`, layering (low
+/// to high priority): WinAnsi base, the Type1 program's built-in encoding (when
+/// the PDF doesn't pin a base encoding by name), then `/Differences`.
+fn build_simple_encoding(
+    doc: &Document,
+    font_dict: &Dictionary,
+    type1_builtin: Option<&HashMap<u8, char>>,
+) -> HashMap<u8, char> {
     let mut map = winansi_base();
-    if let Ok(enc) = font_dict.get(b"Encoding") {
-        match resolve(doc, enc) {
-            Ok(Object::Name(_)) => { /* base name; WinAnsi base is fine for our fallback */ }
-            Ok(Object::Dictionary(d)) => {
-                if let Ok(diffs) = d.get(b"Differences").and_then(|o| o.as_array()) {
-                    let mut code: u32 = 0;
-                    for item in diffs {
-                        match item {
-                            Object::Integer(n) => code = *n as u32,
-                            Object::Name(name) => {
-                                if let Some(ch) = glyph_name_to_char(&String::from_utf8_lossy(name)) {
-                                    if code <= 0xFF {
-                                        map.insert(code as u8, ch);
-                                    }
-                                }
-                                code += 1;
+
+    // Resolve the PDF /Encoding entry once (may be a base name and/or a dict
+    // with /BaseEncoding and /Differences).
+    let enc_obj = font_dict.get(b"Encoding").ok().and_then(|e| resolve(doc, e).ok().cloned());
+    let base_name_pinned = match &enc_obj {
+        Some(Object::Name(_)) => true,
+        Some(Object::Dictionary(d)) => d.get(b"BaseEncoding").is_ok(),
+        _ => false,
+    };
+
+    // Built-in Type1 encoding overrides the WinAnsi base, but only when the PDF
+    // didn't pin a base encoding by name (a named base takes precedence).
+    if !base_name_pinned {
+        if let Some(builtin) = type1_builtin {
+            for (&code, &ch) in builtin {
+                map.insert(code, ch);
+            }
+        }
+    }
+
+    // /Differences always win.
+    if let Some(Object::Dictionary(d)) = &enc_obj {
+        if let Ok(diffs) = d.get(b"Differences").and_then(|o| o.as_array()) {
+            let mut code: u32 = 0;
+            for item in diffs {
+                match item {
+                    Object::Integer(n) => code = *n as u32,
+                    Object::Name(name) => {
+                        if let Some(ch) = glyph_name_to_char(&String::from_utf8_lossy(name)) {
+                            if code <= 0xFF {
+                                map.insert(code as u8, ch);
                             }
-                            _ => {}
                         }
+                        code += 1;
                     }
+                    _ => {}
                 }
             }
-            _ => {}
         }
     }
     map
+}
+
+/// The Type1 font program (`/FontFile`), distinct from FontFile2/3 (which are
+/// TrueType/CFF and handled by [`font_program`] + ttf-parser).
+fn type1_font_program(doc: &Document, descriptor: &Dictionary) -> Option<Vec<u8>> {
+    let r = descriptor.get(b"FontFile").ok()?;
+    resolve_stream(doc, r)
+}
+
+/// Parse a Type1 font program's built-in `/Encoding` into code -> char.
+///
+/// The encoding lives in the program's clear-text header (before the `eexec`
+/// binary section) as either the keyword `StandardEncoding` (nothing custom to
+/// record — the WinAnsi/Standard base table covers it) or a sequence of
+/// `dup <code> /<glyphname> put` entries.
+fn parse_type1_builtin_encoding(bytes: &[u8]) -> HashMap<u8, char> {
+    let mut map = HashMap::new();
+    let clear_end = find_subslice(bytes, b"eexec").unwrap_or(bytes.len());
+    let text = String::from_utf8_lossy(&bytes[..clear_end]);
+
+    if let Some(pos) = text.find("/Encoding") {
+        let rest = text[pos + "/Encoding".len()..].trim_start();
+        if rest.starts_with("StandardEncoding") {
+            return map;
+        }
+    }
+
+    let re = Regex::new(r"dup\s+(\d+)\s*/([^\s/(){}\[\]<>]+)\s+put").unwrap();
+    for cap in re.captures_iter(&text) {
+        if let Ok(code) = cap[1].parse::<u32>() {
+            if code <= 0xFF {
+                if let Some(ch) = glyph_name_to_char(&cap[2]) {
+                    map.insert(code as u8, ch);
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Index of the first occurrence of `needle` in `hay`.
+fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() {
+        return None;
+    }
+    hay.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Minimal WinAnsi/Latin-1 base table for the printable range.
@@ -667,5 +753,46 @@ fn name_string(o: &Object) -> Option<String> {
     match o {
         Object::Name(n) => Some(String::from_utf8_lossy(n).into_owned()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type1_builtin_encoding_parsed() {
+        // Clear-text header of a Type1 program with a custom encoding array,
+        // followed by the eexec binary section (which must be ignored).
+        let prog: &[u8] = b"/Encoding 256 array\n\
+            0 1 255 {1 index exch /.notdef put} for\n\
+            dup 65 /A put\n\
+            dup 97 /a put\n\
+            dup 32 /space put\n\
+            dup 200 /eacute put\n\
+            readonly def\n\
+            eexec\n\x80\x01\x02\x03 dup 1 /ignored put";
+        let m = parse_type1_builtin_encoding(prog);
+        assert_eq!(m.get(&65), Some(&'A'));
+        assert_eq!(m.get(&97), Some(&'a'));
+        assert_eq!(m.get(&32), Some(&' '));
+        assert_eq!(m.get(&200), Some(&'é'));
+        // Entries after `eexec` are not parsed.
+        assert_eq!(m.get(&1), None);
+        // `.notdef` has no Unicode mapping and is dropped.
+        assert!(!m.values().any(|&c| c == '\u{0}'));
+    }
+
+    #[test]
+    fn type1_standard_encoding_yields_empty() {
+        let prog: &[u8] = b"/Encoding StandardEncoding def\neexec\n";
+        assert!(parse_type1_builtin_encoding(prog).is_empty());
+    }
+
+    #[test]
+    fn find_subslice_basic() {
+        assert_eq!(find_subslice(b"abcdef", b"cd"), Some(2));
+        assert_eq!(find_subslice(b"abcdef", b"xy"), None);
+        assert_eq!(find_subslice(b"ab", b"abc"), None);
     }
 }
