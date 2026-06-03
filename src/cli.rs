@@ -103,4 +103,8 @@ pub struct Cli {
     /// Suppress progress logging.
     #[arg(short = 'q', long)]
     pub quiet: bool,
+
+    /// Print processing time and throughput (pages/sec) per file and overall.
+    #[arg(long)]
+    pub timing: bool,
 }

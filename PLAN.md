@@ -1,21 +1,21 @@
 # pdf-rs — remaining work
 
-The build is feature-complete and tested (23 tests; whole corpus converts across all output
+The build is feature-complete and tested (26 tests; whole corpus converts across all output
 modes with no panics). See [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) for
 what shipped. This file lists only what's left.
 
 ## Open (tractable)
 
-- [ ] **Type1 (`FontFile`) charstring fonts** without `/ToUnicode` and with a non-standard built-in
-  encoding still mis-decode. *(Note: the common gibberish case — `issue-336` — was a ToUnicode CMap
-  bug and is now fixed; embedded TrueType/CFF and standard glyph names decode. This is the rarer
-  residue.)* Would need a Type1 charstring/`/Encoding` parser.
-- [ ] **Dense academic multi-column edge cases** — clean two-column pages now read correctly via
-  gutter detection; pages with a vertical margin stamp + an abstract that lives *inside* a column
-  can still mis-order. Would need per-region column detection (recurse gutter detection into bands).
-- [ ] **Benchmarks** — add a pages/sec measurement (criterion or a `--timing` flag).
+- [ ] **Dense academic multi-column edge cases** — clean two-column pages read correctly via gutter
+  detection; pages with a vertical margin stamp + an abstract that lives *inside* a column can still
+  mis-order. Would need per-region column detection (recurse gutter detection into bands).
+  *(Attempted: a band-recursive rewrite was prototyped but reverted — naively treating full-width
+  spanners as band separators fragments full-width code listings inside two-column papers
+  (`2408.02509v1`), and it gave no clear net win on the corpus. Needs validation data — see threshold
+  tuning below — before re-attempting.)*
 - [ ] **Threshold tuning** — pull `opendataloader-bench` (200 PDFs w/ ground truth) and tune the
-  heading/list/table heuristics against it. (Large download; not done here.)
+  heading/list/table heuristics against it. (Large download; not done here.) Also unblocks
+  validating the multi-column rework above.
 
 ## Blocked in this environment (need external assets)
 
@@ -34,7 +34,11 @@ what shipped. This file lists only what's left.
 ---
 
 ### Done in the latest pass (for reference)
-Tagged-PDF `/ParentTree` + PDF/UA metadata · table figure-vs-table discrimination · ToUnicode CMap
-tokenizer fix (packed hex) · two-column gutter reading order · OCR end-to-end validation · publish
-prep (Cargo metadata, MIT LICENSE, include whitelist). Earlier: span inference, borderless tables,
-glyph-name expansion, tagged-PDF MCID association.
+Type1 (`/FontFile`) built-in `/Encoding` parser — symbolic Type1 fonts with a non-standard encoding
+and no `/ToUnicode` now decode (verified on `1901.03003`: `†`, `‡`, `{ }`, `−`, `·` etc. recovered) ·
+`--timing` flag (pages/sec per file + overall).
+
+Earlier: tagged-PDF `/ParentTree` + PDF/UA metadata · table figure-vs-table discrimination · ToUnicode
+CMap tokenizer fix (packed hex) · two-column gutter reading order · OCR end-to-end validation · publish
+prep (Cargo metadata, MIT LICENSE, include whitelist) · span inference, borderless tables, glyph-name
+expansion, tagged-PDF MCID association.

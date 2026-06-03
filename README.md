@@ -50,6 +50,9 @@ pdf-rs report.pdf --sanitize --detect-strikethrough --markdown-with-html
 # faster on big PDFs (deterministic)
 pdf-rs big.pdf --threads 8
 
+# report processing time and throughput (pages/sec)
+pdf-rs big.pdf --timing
+
 # stream to stdout (single format); whole directory (recursive)
 pdf-rs report.pdf -f markdown --to-stdout
 pdf-rs ./pdfs/ -o out/

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 
@@ -34,23 +35,51 @@ pub fn run(cli: &Cli) -> Result<()> {
         bail!("--to-stdout requires a single input file and a single format");
     }
 
+    let overall = cli.timing.then(Instant::now);
+    let mut total_pages = 0usize;
     for file in &files {
         if !cli.quiet {
             eprintln!("processing {}", file.display());
         }
-        if let Err(e) = process_one(cli, file, &formats, pages.as_ref()) {
-            eprintln!("error: {}: {e:#}", file.display());
+        let started = cli.timing.then(Instant::now);
+        match process_one(cli, file, &formats, pages.as_ref()) {
+            Ok(n) => {
+                total_pages += n;
+                if let Some(started) = started {
+                    let secs = started.elapsed().as_secs_f64();
+                    eprintln!("  timing: {n} page(s) in {secs:.3}s ({:.1} pages/s)", pps(n, secs));
+                }
+            }
+            Err(e) => eprintln!("error: {}: {e:#}", file.display()),
         }
+    }
+    if let Some(overall) = overall {
+        let secs = overall.elapsed().as_secs_f64();
+        eprintln!(
+            "timing: {} file(s), {total_pages} page(s) in {secs:.3}s ({:.1} pages/s)",
+            files.len(),
+            pps(total_pages, secs),
+        );
     }
     Ok(())
 }
 
+/// Pages per second, guarding against a zero/negative elapsed time.
+fn pps(pages: usize, secs: f64) -> f64 {
+    if secs > 0.0 {
+        pages as f64 / secs
+    } else {
+        0.0
+    }
+}
+
+/// Process a single PDF; returns the number of pages analyzed (for throughput).
 fn process_one(
     cli: &Cli,
     file: &Path,
     formats: &[Format],
     pages: Option<&BTreeSet<usize>>,
-) -> Result<()> {
+) -> Result<usize> {
     let mut doc = LopdfBackend::load(file, cli.password.as_deref(), pages)
         .with_context(|| format!("extracting {}", file.display()))?;
     // Optional OCR for scanned pages (no-op unless built with --features ocr).
@@ -138,7 +167,7 @@ fn process_one(
             eprintln!("  wrote {} chapter file(s) -> {}", chapters.len(), dir.display());
         }
         if formats == [Format::Markdown] {
-            return Ok(());
+            return Ok(analyzed.num_pages);
         }
     }
 
@@ -163,7 +192,7 @@ fn process_one(
             }
         }
     }
-    Ok(())
+    Ok(analyzed.num_pages)
 }
 
 fn parse_formats(s: &str) -> Result<Vec<Format>> {
