@@ -1,4 +1,4 @@
-//! Orchestration: walk inputs, extract -> analyze -> render -> write.
+//! Orchestration: extract -> analyze -> render -> write (single PDF).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -7,11 +7,11 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 
 use crate::analyze::{self, Options};
-use crate::cli::Cli;
+use crate::cli::ReadArgs;
 use crate::extract::{LopdfBackend, PdfBackend};
 use crate::render::{self, RenderOptions, split};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Format {
     Markdown,
     Json,
@@ -19,49 +19,26 @@ enum Format {
     Text,
 }
 
-pub fn run(cli: &Cli) -> Result<()> {
-    let formats = parse_formats(&cli.format)?;
-    let pages = match &cli.pages {
+/// Run the `read` subcommand: convert one PDF to stdout (or `--out`).
+pub fn run_read(args: &ReadArgs) -> Result<()> {
+    let format = resolve_format(args.out.as_deref(), args.format.as_deref())?;
+    let pages = match &args.pages {
         Some(s) => Some(parse_pages(s)?),
         None => None,
     };
 
-    let files = collect_pdfs(&cli.inputs);
-    if files.is_empty() {
-        bail!("no PDF files found in the given input(s)");
+    let file = &args.input;
+    if !file.is_file() {
+        bail!("input is not a file: {}", file.display());
     }
 
-    if cli.to_stdout && (files.len() > 1 || formats.len() != 1) {
-        bail!("--to-stdout requires a single input file and a single format");
-    }
-
-    let overall = cli.timing.then(Instant::now);
-    let mut total_pages = 0usize;
-    for file in &files {
-        if !cli.quiet {
-            eprintln!("processing {}", file.display());
-        }
-        let started = cli.timing.then(Instant::now);
-        match process_one(cli, file, &formats, pages.as_ref()) {
-            Ok(n) => {
-                total_pages += n;
-                if let Some(started) = started {
-                    let secs = started.elapsed().as_secs_f64();
-                    eprintln!(
-                        "  timing: {n} page(s) in {secs:.3}s ({:.1} pages/s)",
-                        pps(n, secs)
-                    );
-                }
-            }
-            Err(e) => eprintln!("error: {}: {e:#}", file.display()),
-        }
-    }
-    if let Some(overall) = overall {
-        let secs = overall.elapsed().as_secs_f64();
+    let started = args.timing.then(Instant::now);
+    let n = process_one(args, file, format, pages.as_ref())?;
+    if let Some(started) = started {
+        let secs = started.elapsed().as_secs_f64();
         eprintln!(
-            "timing: {} file(s), {total_pages} page(s) in {secs:.3}s ({:.1} pages/s)",
-            files.len(),
-            pps(total_pages, secs),
+            "timing: {n} page(s) in {secs:.3}s ({:.1} pages/s)",
+            pps(n, secs)
         );
     }
     Ok(())
@@ -74,9 +51,9 @@ fn pps(pages: usize, secs: f64) -> f64 {
 
 /// Process a single PDF; returns the number of pages analyzed (for throughput).
 fn process_one(
-    cli: &Cli,
+    cli: &ReadArgs,
     file: &Path,
-    formats: &[Format],
+    format: Format,
     pages: Option<&BTreeSet<usize>>,
 ) -> Result<usize> {
     let mut doc = LopdfBackend::load(file, cli.password.as_deref(), pages)
@@ -104,19 +81,54 @@ fn process_one(
         page_separator: cli.page_separator.clone(),
         html_tables: cli.markdown_with_html,
     };
-    let out_dir = cli.output_dir.clone().unwrap_or_else(|| {
-        file.parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
-    });
-    let base = file
+
+    let to_stdout = cli.out.is_none();
+
+    // Side outputs need a destination on disk.
+    if to_stdout {
+        if cli.split {
+            bail!("--split requires --out <dir>");
+        }
+        if cli.annotate {
+            bail!("--annotate requires --out");
+        }
+        if cli.tagged_pdf {
+            bail!("--tagged-pdf requires --out");
+        }
+    }
+    if cli.split && format != Format::Markdown {
+        bail!("--split only supports markdown output");
+    }
+
+    // Output directory + base name for images and side-car artifacts. With
+    // --split, --out is itself the chapter directory; otherwise it is a file
+    // whose parent/stem drive the naming. In stdout mode nothing is written,
+    // but we still derive a sensible base from the input file.
+    let input_base = file
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output")
         .to_string();
+    let (out_dir, base) = match (&cli.out, cli.split) {
+        (Some(out), true) => (out.clone(), input_base),
+        (Some(out), false) => {
+            let dir = out
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
+            let base = out
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output")
+                .to_string();
+            (dir, base)
+        }
+        (None, _) => (PathBuf::from("."), input_base),
+    };
 
     // Resolve images (write files / embed / drop) before rendering.
-    if !cli.to_stdout {
+    if !to_stdout {
         let mode = render::images::parse_mode(&cli.image_output);
         let image_dir = cli
             .image_dir
@@ -175,11 +187,11 @@ fn process_one(
         }
     }
 
-    // Chapter split (Markdown only) takes a dedicated directory.
+    // Chapter split (Markdown only): --out is the chapter directory.
     if cli.split {
+        let dir = cli.out.as_ref().expect("--split requires --out (validated)");
         let chapters = split::split_markdown(&analyzed, cli.split_level.max(1), &ropts);
-        let dir = out_dir.join(&base);
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         for ch in &chapters {
             std::fs::write(dir.join(&ch.filename), &ch.content)?;
         }
@@ -187,61 +199,56 @@ fn process_one(
         std::fs::write(dir.join("index.md"), index)?;
         if !cli.quiet {
             eprintln!(
-                "  wrote {} chapter file(s) -> {}",
+                "wrote {} chapter file(s) -> {}",
                 chapters.len(),
                 dir.display()
             );
         }
-        if formats == [Format::Markdown] {
-            return Ok(analyzed.num_pages);
-        }
+        return Ok(analyzed.num_pages);
     }
 
-    std::fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
-
-    for &fmt in formats {
-        let (ext, content) = match fmt {
-            Format::Markdown => ("md", render::to_markdown(&analyzed, &ropts)),
-            Format::Json => ("json", render::to_json(&analyzed)),
-            Format::Html => ("html", render::to_html(&analyzed)),
-            Format::Text => ("txt", render::to_text(&analyzed)),
-        };
-        if cli.to_stdout {
-            print!("{content}");
-        } else {
-            let path = out_dir.join(format!("{base}.{ext}"));
-            std::fs::write(&path, content)
-                .with_context(|| format!("writing {}", path.display()))?;
+    let content = match format {
+        Format::Markdown => render::to_markdown(&analyzed, &ropts),
+        Format::Json => render::to_json(&analyzed),
+        Format::Html => render::to_html(&analyzed),
+        Format::Text => render::to_text(&analyzed),
+    };
+    match &cli.out {
+        None => print!("{content}"),
+        Some(out) => {
+            if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            std::fs::write(out, content).with_context(|| format!("writing {}", out.display()))?;
             if !cli.quiet {
-                eprintln!("  wrote {}", path.display());
+                eprintln!("wrote {}", out.display());
             }
         }
     }
     Ok(analyzed.num_pages)
 }
 
-fn parse_formats(s: &str) -> Result<Vec<Format>> {
-    let mut out = Vec::new();
-    for part in s
-        .split(',')
-        .map(|p| p.trim().to_lowercase())
-        .filter(|p| !p.is_empty())
-    {
-        let f = match part.as_str() {
-            "markdown" | "md" => Format::Markdown,
-            "json" => Format::Json,
-            "html" => Format::Html,
-            "text" | "txt" => Format::Text,
-            other => bail!("unknown format '{other}' (use markdown, json, html, text)"),
-        };
-        if !out.contains(&f) {
-            out.push(f);
-        }
+/// Resolve the single output format: explicit `--format` wins, else infer from
+/// the `--out` file extension, else default to Markdown (stdout).
+fn resolve_format(out: Option<&Path>, flag: Option<&str>) -> Result<Format> {
+    if let Some(f) = flag {
+        return parse_format(f);
     }
-    if out.is_empty() {
-        bail!("no output format specified");
+    if let Some(ext) = out.and_then(|p| p.extension()).and_then(|e| e.to_str()) {
+        return parse_format(ext);
     }
-    Ok(out)
+    Ok(Format::Markdown)
+}
+
+fn parse_format(s: &str) -> Result<Format> {
+    match s.trim().to_lowercase().as_str() {
+        "markdown" | "md" => Ok(Format::Markdown),
+        "json" => Ok(Format::Json),
+        "html" | "htm" => Ok(Format::Html),
+        "text" | "txt" => Ok(Format::Text),
+        other => bail!("unknown format '{other}' (use markdown, json, html, text)"),
+    }
 }
 
 /// Parse a page spec like "1,3,5-7" into a 1-indexed set.
@@ -277,44 +284,10 @@ pub fn parse_pages(s: &str) -> Result<BTreeSet<usize>> {
     Ok(set)
 }
 
-/// Expand inputs (files or dirs) into a list of PDF files.
-fn collect_pdfs(inputs: &[PathBuf]) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for inp in inputs {
-        if inp.is_dir() {
-            collect_dir(inp, &mut out);
-        } else if is_pdf(inp) {
-            out.push(inp.clone());
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn collect_dir(dir: &Path, out: &mut Vec<PathBuf>) {
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                collect_dir(&p, out);
-            } else if is_pdf(&p) {
-                out.push(p);
-            }
-        }
-    }
-}
-
-fn is_pdf(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("pdf"))
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn pages_parse() {
@@ -326,8 +299,25 @@ mod tests {
     }
 
     #[test]
-    fn formats_parse() {
-        assert_eq!(parse_formats("markdown,json").unwrap().len(), 2);
-        assert!(parse_formats("bogus").is_err());
+    fn format_parse() {
+        assert!(parse_format("markdown").is_ok());
+        assert!(parse_format("json").is_ok());
+        assert!(parse_format("bogus").is_err());
+    }
+
+    #[test]
+    fn format_resolution() {
+        // explicit flag wins over extension
+        assert_eq!(
+            resolve_format(Some(Path::new("a.md")), Some("json")).unwrap(),
+            Format::Json
+        );
+        // inferred from extension
+        assert_eq!(
+            resolve_format(Some(Path::new("a.json")), None).unwrap(),
+            Format::Json
+        );
+        // default to markdown (stdout, no flag)
+        assert_eq!(resolve_format(None, None).unwrap(), Format::Markdown);
     }
 }

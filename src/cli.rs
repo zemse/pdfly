@@ -2,26 +2,39 @@
 
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "pdf-rs",
+    name = "pdf",
     version,
-    about = "Convert PDF files to Markdown (and JSON/HTML/text), optionally split by chapter."
+    about = "Read PDF files and convert them to Markdown (and JSON/HTML/text)."
 )]
 pub struct Cli {
-    /// Input PDF file(s) or directories (directories are searched recursively).
-    #[arg(required = true)]
-    pub inputs: Vec<PathBuf>,
+    #[command(subcommand)]
+    pub command: Command,
+}
 
-    /// Directory to write output files. Default: alongside each input file.
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Read a PDF and convert it to Markdown/JSON/HTML/text (stdout by default).
+    Read(ReadArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ReadArgs {
+    /// Input PDF file.
+    pub input: PathBuf,
+
+    /// Write output to a file instead of stdout. With --split this is the
+    /// output directory. Format is inferred from the file extension.
     #[arg(short = 'o', long)]
-    pub output_dir: Option<PathBuf>,
+    pub out: Option<PathBuf>,
 
-    /// Output formats, comma-separated: markdown, json, html, text.
-    #[arg(short = 'f', long, default_value = "markdown")]
-    pub format: String,
+    /// Output format: markdown, json, html, text. Overrides the format
+    /// inferred from --out's extension. Default: markdown.
+    #[arg(short = 'f', long)]
+    pub format: Option<String>,
 
     /// Password for encrypted PDFs.
     #[arg(short = 'p', long)]
@@ -31,7 +44,7 @@ pub struct Cli {
     #[arg(long)]
     pub pages: Option<String>,
 
-    /// Split Markdown into one file per chapter (heading) inside a directory.
+    /// Split Markdown into one file per chapter (heading). Requires --out <dir>.
     #[arg(long)]
     pub split: bool,
 
@@ -71,15 +84,17 @@ pub struct Cli {
     #[arg(long, default_value = "png", value_parser = ["png", "jpeg"])]
     pub image_format: String,
 
-    /// Directory for extracted images (default: <output-dir>/<name>_images).
+    /// Directory for extracted images (default: <out-dir>/<name>_images).
     #[arg(long)]
     pub image_dir: Option<std::path::PathBuf>,
 
     /// Write an annotated debug PDF with a box drawn around each detected element.
+    /// Requires --out.
     #[arg(long)]
     pub annotate: bool,
 
     /// Write a tagged PDF (adds a /StructTreeRoot structure tree to a copy).
+    /// Requires --out.
     #[arg(long)]
     pub tagged_pdf: bool,
 
@@ -96,15 +111,11 @@ pub struct Cli {
     #[arg(long)]
     pub markdown_with_html: bool,
 
-    /// Write the single requested format to stdout instead of files.
-    #[arg(long)]
-    pub to_stdout: bool,
-
     /// Suppress progress logging.
     #[arg(short = 'q', long)]
     pub quiet: bool,
 
-    /// Print processing time and throughput (pages/sec) per file and overall.
+    /// Print processing time and throughput (pages/sec).
     #[arg(long)]
     pub timing: bool,
 }

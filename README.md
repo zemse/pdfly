@@ -10,52 +10,57 @@ Pure Rust, no native libraries, no GPU, no network — a single static binary.
 
 ```bash
 cargo build --release
-# binary at target/release/pdf-rs
+# binary at target/release/pdf
 ```
 
 ## Usage
 
-```bash
-# PDF -> Markdown (written next to the input file)
-pdf-rs report.pdf
+`pdf read <file>` converts a PDF and prints the result to **stdout** by default.
+Pass `--out <path>` to write a file instead; the format is inferred from the
+extension (`.md`, `.json`, `.html`, `.txt`) unless you override it with `--format`.
 
-# choose output dir and formats
-pdf-rs report.pdf -o out/ -f markdown,json,html,text
+```bash
+# PDF -> Markdown on stdout
+pdf read report.pdf
+
+# write to a file (format inferred from the extension)
+pdf read report.pdf -o report.md
+pdf read report.pdf -o report.json
+
+# pick a format explicitly (still stdout)
+pdf read report.pdf -f json
 
 # only some pages
-pdf-rs report.pdf --pages 1,3,5-7
+pdf read report.pdf --pages 1,3,5-7
 
 # encrypted PDF
-pdf-rs secret.pdf -p mypassword
+pdf read secret.pdf -p mypassword
 
-# split a book into one Markdown file per chapter (+ index.md) in out/<name>/
-pdf-rs book.pdf -o out/ --split
-pdf-rs book.pdf -o out/ --split --split-level 2   # split on H1 and H2
+# split a book into one Markdown file per chapter (+ index.md) in a directory
+pdf read book.pdf -o out/ --split
+pdf read book.pdf -o out/ --split --split-level 2   # split on H1 and H2
 
 # images: extract to files (default), embed as base64, or drop
-pdf-rs report.pdf --image-output external --image-format png
-pdf-rs report.pdf --image-output embedded
-pdf-rs report.pdf --image-output off
+# (external images require --out; stdout output drops images)
+pdf read report.pdf -o report.md --image-output external --image-format png
+pdf read report.pdf -o report.md --image-output embedded
+pdf read report.pdf --image-output off
 
 # use the PDF's own tags (tagged PDFs) instead of layout heuristics
-pdf-rs tagged.pdf --use-struct-tree
+pdf read tagged.pdf --use-struct-tree
 
-# write a tagged PDF (adds a structure tree) / an annotated debug PDF
-pdf-rs report.pdf --tagged-pdf
-pdf-rs report.pdf --annotate
+# write a tagged PDF (adds a structure tree) / an annotated debug PDF (need --out)
+pdf read report.pdf -o report.md --tagged-pdf
+pdf read report.pdf -o report.md --annotate
 
 # redact sensitive data; detect strikethrough; HTML tables in Markdown
-pdf-rs report.pdf --sanitize --detect-strikethrough --markdown-with-html
+pdf read report.pdf --sanitize --detect-strikethrough --markdown-with-html
 
 # faster on big PDFs (deterministic)
-pdf-rs big.pdf --threads 8
+pdf read big.pdf --threads 8
 
 # report processing time and throughput (pages/sec)
-pdf-rs big.pdf --timing
-
-# stream to stdout (single format); whole directory (recursive)
-pdf-rs report.pdf -f markdown --to-stdout
-pdf-rs ./pdfs/ -o out/
+pdf read big.pdf --timing
 ```
 
 ### OCR for scanned PDFs (optional)
@@ -67,12 +72,12 @@ point to [ocrs](https://github.com/robertknight/ocrs) `.rten` model files:
 cargo build --release --features ocr
 export PDFRS_OCR_DETECTION_MODEL=/path/to/text-detection.rten
 export PDFRS_OCR_RECOGNITION_MODEL=/path/to/text-recognition.rten
-pdf-rs scanned.pdf            # image-only pages are OCR'd automatically
+pdf read scanned.pdf          # image-only pages are OCR'd automatically
 ```
 
 The default build omits OCR entirely, keeping the binary small.
 
-Run `pdf-rs --help` for all options.
+Run `pdf read --help` for all options.
 
 ## What it does
 
