@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use pdf_rs::analyze::{Options, analyze};
-use pdf_rs::extract::{LopdfBackend, PdfBackend};
-use pdf_rs::render::{self, RenderOptions};
+use pdfly::analyze::{Options, analyze};
+use pdfly::extract::{LopdfBackend, PdfBackend};
+use pdfly::render::{self, RenderOptions};
 
 fn corpus(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

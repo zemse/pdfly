@@ -1,4 +1,4 @@
-# pdf-rs — remaining work
+# pdfly — remaining work
 
 The build is feature-complete and tested (26 tests; whole corpus converts across all output
 modes with no panics). See [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) for

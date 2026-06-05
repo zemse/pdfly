@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use pdf_rs::analyze::{Options, analyze};
-use pdf_rs::extract::{LopdfBackend, PdfBackend};
-use pdf_rs::render::{self, RenderOptions, split};
+use pdfly::analyze::{Options, analyze};
+use pdfly::extract::{LopdfBackend, PdfBackend};
+use pdfly::render::{self, RenderOptions, split};
 
 fn corpus(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -12,7 +12,7 @@ fn corpus(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
-fn analyze_file(name: &str) -> pdf_rs::model::AnalyzedDoc {
+fn analyze_file(name: &str) -> pdfly::model::AnalyzedDoc {
     let doc = LopdfBackend::load(&corpus(name), None, None).unwrap();
     analyze(&doc, &Options::default())
 }
@@ -70,7 +70,7 @@ fn book_chapter_splits_into_multiple_files() {
 
 #[test]
 fn images_extract_to_files() {
-    use pdf_rs::render::images::{ImageMode, process_images};
+    use pdfly::render::images::{ImageMode, process_images};
     let doc = LopdfBackend::load(
         &corpus("pdfua-1-reference-suite-1-1/PDFUA-Ref-2-01_Magazine-danish.pdf"),
         None,
@@ -89,8 +89,8 @@ fn images_extract_to_files() {
 
 #[test]
 fn markdown_html_table_mode() {
-    use pdf_rs::extract::{PdfMeta, Rect};
-    use pdf_rs::model::{AnalyzedDoc, Cell, Element};
+    use pdfly::extract::{PdfMeta, Rect};
+    use pdfly::model::{AnalyzedDoc, Cell, Element};
     let doc = AnalyzedDoc {
         meta: PdfMeta::default(),
         num_pages: 1,
@@ -145,7 +145,7 @@ fn markdown_html_table_mode() {
 
 #[test]
 fn hidden_text_is_filtered_by_content_safety() {
-    use pdf_rs::extract::{Document, Page, PdfMeta, Rect, TextRun};
+    use pdfly::extract::{Document, Page, PdfMeta, Rect, TextRun};
     let run = |text: &str, hidden: bool| TextRun {
         text: text.into(),
         bbox: Rect::new(50.0, 700.0, 150.0, 712.0),
@@ -197,7 +197,7 @@ fn hidden_text_is_filtered_by_content_safety() {
 fn tagged_pdf_has_marked_content_and_round_trips() {
     let a = analyze_file("lorem.pdf");
     let tmp = std::env::temp_dir().join("pdfrs_tagged.pdf");
-    pdf_rs::render::tagged::write_tagged_pdf(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
+    pdfly::render::tagged::write_tagged_pdf(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
     let bytes = std::fs::read(&tmp).unwrap();
     assert!(
         bytes.windows(14).any(|w| w == b"StructTreeRoot"),
@@ -242,7 +242,7 @@ fn tagged_pdf_has_marked_content_and_round_trips() {
 fn annotated_pdf_is_written_and_loadable() {
     let a = analyze_file("lorem.pdf");
     let tmp = std::env::temp_dir().join("pdfrs_annotated.pdf");
-    pdf_rs::render::annotate::write_annotated(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
+    pdfly::render::annotate::write_annotated(&corpus("lorem.pdf"), None, &a, &tmp).unwrap();
     let again = LopdfBackend::load(&tmp, None, None).unwrap();
     assert_eq!(again.pages.len(), 1);
 }

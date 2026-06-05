@@ -1,13 +1,13 @@
 [package]
-name = "pdf-rs"
+name = "pdfly"
 version = "0.1.0"
 edition = "2024"
 description = "Convert PDFs to clean Markdown (and JSON/HTML/text), with chapter splitting, image extraction, and tagged-PDF output. Pure Rust, no native deps."
 authors = ["Soham Zemse <soham@zemse.in>"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/zemse/pdf-rs"
-homepage = "https://github.com/zemse/pdf-rs"
+repository = "https://github.com/zemse/pdfly"
+homepage = "https://github.com/zemse/pdfly"
 keywords = ["pdf", "markdown", "extraction", "cli", "rag"]
 categories = ["command-line-utilities", "text-processing"]
 # Whitelist what ships (never blacklist).
@@ -22,7 +22,7 @@ include = [
 ]
 
 [[bin]]
-name = "pdf"
+name = "pdfly"
 path = "src/main.rs"
 
 [dependencies]

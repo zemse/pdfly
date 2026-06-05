@@ -1,4 +1,4 @@
-# pdf-rs
+# pdfly
 
 A fast, dependency-light **PDF → Markdown** command-line tool written in pure Rust.
 It also emits JSON (with bounding boxes), HTML, and plain text, and can split a
@@ -9,61 +9,64 @@ Pure Rust, no native libraries, no GPU, no network — a single static binary.
 ## Install / build
 
 ```bash
-# install the `pdf` binary from source
-cargo install --git https://github.com/zemse/pdf-rs
+# install the `pdfly` binary from crates.io
+cargo install pdfly
 
-# or build locally
-cargo build --release   # binary at target/release/pdf
+# ...or from git
+cargo install --git https://github.com/zemse/pdfly
+
+# ...or build locally
+cargo build --release   # binary at target/release/pdfly
 ```
 
 ## Usage
 
-`pdf read <file>` converts a PDF and prints the result to **stdout** by default.
+`pdfly read <file>` converts a PDF and prints the result to **stdout** by default.
 Pass `--out <path>` to write a file instead; the format is inferred from the
 extension (`.md`, `.json`, `.html`, `.txt`) unless you override it with `--format`.
 
 ```bash
 # PDF -> Markdown on stdout
-pdf read report.pdf
+pdfly read report.pdf
 
 # write to a file (format inferred from the extension)
-pdf read report.pdf -o report.md
-pdf read report.pdf -o report.json
+pdfly read report.pdf -o report.md
+pdfly read report.pdf -o report.json
 
 # pick a format explicitly (still stdout)
-pdf read report.pdf -f json
+pdfly read report.pdf -f json
 
 # only some pages
-pdf read report.pdf --pages 1,3,5-7
+pdfly read report.pdf --pages 1,3,5-7
 
 # encrypted PDF
-pdf read secret.pdf -p mypassword
+pdfly read secret.pdf -p mypassword
 
 # split a book into one Markdown file per chapter (+ index.md) in a directory
-pdf read book.pdf -o out/ --split
-pdf read book.pdf -o out/ --split --split-level 2   # split on H1 and H2
+pdfly read book.pdf -o out/ --split
+pdfly read book.pdf -o out/ --split --split-level 2   # split on H1 and H2
 
 # images: extract to files (default), embed as base64, or drop
 # (external images require --out; stdout output drops images)
-pdf read report.pdf -o report.md --image-output external --image-format png
-pdf read report.pdf -o report.md --image-output embedded
-pdf read report.pdf --image-output off
+pdfly read report.pdf -o report.md --image-output external --image-format png
+pdfly read report.pdf -o report.md --image-output embedded
+pdfly read report.pdf --image-output off
 
 # use the PDF's own tags (tagged PDFs) instead of layout heuristics
-pdf read tagged.pdf --use-struct-tree
+pdfly read tagged.pdf --use-struct-tree
 
 # write a tagged PDF (adds a structure tree) / an annotated debug PDF (need --out)
-pdf read report.pdf -o report.md --tagged-pdf
-pdf read report.pdf -o report.md --annotate
+pdfly read report.pdf -o report.md --tagged-pdf
+pdfly read report.pdf -o report.md --annotate
 
 # redact sensitive data; detect strikethrough; HTML tables in Markdown
-pdf read report.pdf --sanitize --detect-strikethrough --markdown-with-html
+pdfly read report.pdf --sanitize --detect-strikethrough --markdown-with-html
 
 # faster on big PDFs (deterministic)
-pdf read big.pdf --threads 8
+pdfly read big.pdf --threads 8
 
 # report processing time and throughput (pages/sec)
-pdf read big.pdf --timing
+pdfly read big.pdf --timing
 ```
 
 ### OCR for scanned PDFs (optional)
@@ -75,12 +78,12 @@ point to [ocrs](https://github.com/robertknight/ocrs) `.rten` model files:
 cargo build --release --features ocr
 export PDFRS_OCR_DETECTION_MODEL=/path/to/text-detection.rten
 export PDFRS_OCR_RECOGNITION_MODEL=/path/to/text-recognition.rten
-pdf read scanned.pdf          # image-only pages are OCR'd automatically
+pdfly read scanned.pdf          # image-only pages are OCR'd automatically
 ```
 
 The default build omits OCR entirely, keeping the binary small.
 
-Run `pdf read --help` for all options.
+Run `pdfly read --help` for all options.
 
 ## What it does
 

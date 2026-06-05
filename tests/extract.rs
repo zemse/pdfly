@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use pdf_rs::extract::{LopdfBackend, PdfBackend};
+use pdfly::extract::{LopdfBackend, PdfBackend};
 
 fn corpus(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

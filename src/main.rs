@@ -1,7 +1,7 @@
 use clap::Parser;
 
-use pdf_rs::cli::{Cli, Command};
-use pdf_rs::pipeline;
+use pdfly::cli::{Cli, Command};
+use pdfly::pipeline;
 
 fn main() {
     let cli = Cli::parse();
