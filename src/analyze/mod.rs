@@ -197,6 +197,7 @@ pub fn analyze(doc: &Document, opts: &Options) -> AnalyzedDoc {
         elements.extend(page_elements);
     }
 
+    merge_cross_page_tables(&mut elements);
     assign_heading_levels(&mut elements, &mut heading_sizes);
 
     let mut analyzed = AnalyzedDoc {
@@ -250,6 +251,8 @@ fn detect_headers_footers(
         return drop;
     }
     // Map normalized header/footer text -> list of (page, line) occurrences.
+    // Skip lines that sit on a dense baseline (≥4 segments at the same y) —
+    // those are table-row cells, not running headers/footers.
     let mut seen: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
     for (pi, page) in pages.iter().enumerate() {
         let h = page.media_box.height();
@@ -261,6 +264,20 @@ fn detect_headers_footers(
         for (li, line) in page_lines[pi].iter().enumerate() {
             let cy = line.bbox.center_y();
             if cy >= top_cut || cy <= bot_cut {
+                // Skip lines on a dense baseline (≥ 4 segments at the
+                // same y) — those are table-row cells at page edges,
+                // not running headers/footers. Short tokens like "13"
+                // or "NA" otherwise match across pages after digit
+                // normalization and incorrectly eat boundary rows.
+                let fs = line.font_size.max(1.0);
+                let tol = fs * 0.5;
+                let siblings = page_lines[pi]
+                    .iter()
+                    .filter(|l| (l.bbox.center_y() - cy).abs() <= tol)
+                    .count();
+                if siblings >= 4 {
+                    continue;
+                }
                 let key = normalize_running(&line.text);
                 if key.len() >= 2 {
                     seen.entry(key).or_default().push((pi, li));
@@ -428,6 +445,80 @@ fn classify_block(
             page,
         });
         i = j;
+    }
+}
+
+/// Merge tables from consecutive pages when they share the same column count —
+/// these are a single table split by page breaks. Strips empty boundary rows
+/// left over from the grid extending past the last/first data row.
+///
+/// Looks past small intervening non-table elements (images placed between
+/// tables by the page-element ordering) and tracks the highest page number
+/// reached so far for chained merges across 3+ pages.
+fn merge_cross_page_tables(elements: &mut Vec<Element>) {
+    let mut i = 0;
+    while i < elements.len() {
+        let (ncols_a, last_page) = if let Element::Table { rows, page, .. } = &elements[i] {
+            (rows.iter().map(|r| r.len()).max().unwrap_or(0), *page)
+        } else {
+            i += 1;
+            continue;
+        };
+        if ncols_a == 0 {
+            i += 1;
+            continue;
+        }
+
+        // Look ahead for a table on the next page (skip small non-table
+        // elements like images that sit between the two table fragments).
+        let mut j = i + 1;
+        while j < elements.len() {
+            if let Element::Table { rows, page, .. } = &elements[j] {
+                let ncols_b = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+                let cur_last = if let Element::Table { page: pa, .. } = &elements[i] {
+                    *pa
+                } else {
+                    last_page
+                };
+                if ncols_b == ncols_a && *page <= cur_last + 2 && *page > cur_last {
+                    // Merge: remove table at j, fold into table at i.
+                    let next = elements.remove(j);
+                    if let (
+                        Element::Table {
+                            rows, bbox, page, ..
+                        },
+                        Element::Table {
+                            rows: mut rb,
+                            bbox: bb,
+                            page: pb,
+                            ..
+                        },
+                    ) = (&mut elements[i], next)
+                    {
+                        while rows
+                            .last()
+                            .is_some_and(|r| r.iter().all(|c| c.text.trim().is_empty()))
+                        {
+                            rows.pop();
+                        }
+                        while rb
+                            .first()
+                            .is_some_and(|r| r.iter().all(|c| c.text.trim().is_empty()))
+                        {
+                            rb.remove(0);
+                        }
+                        rows.extend(rb);
+                        bbox.union(&bb);
+                        *page = pb;
+                    }
+                    // don't advance j — check for another merge at the same position
+                    continue;
+                }
+                break; // different column count or too far away
+            }
+            j += 1;
+        }
+        i += 1;
     }
 }
 
