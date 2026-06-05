@@ -189,7 +189,10 @@ fn process_one(
 
     // Chapter split (Markdown only): --out is the chapter directory.
     if cli.split {
-        let dir = cli.out.as_ref().expect("--split requires --out (validated)");
+        let dir = cli
+            .out
+            .as_ref()
+            .expect("--split requires --out (validated)");
         let chapters = split::split_markdown(&analyzed, cli.split_level.max(1), &ropts);
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         for ch in &chapters {

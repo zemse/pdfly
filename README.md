@@ -9,8 +9,11 @@ Pure Rust, no native libraries, no GPU, no network — a single static binary.
 ## Install / build
 
 ```bash
-cargo build --release
-# binary at target/release/pdf
+# install the `pdf` binary from source
+cargo install --git https://github.com/zemse/pdf-rs
+
+# or build locally
+cargo build --release   # binary at target/release/pdf
 ```
 
 ## Usage

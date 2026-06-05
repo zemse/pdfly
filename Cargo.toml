@@ -6,6 +6,8 @@ description = "Convert PDFs to clean Markdown (and JSON/HTML/text), with chapter
 authors = ["Soham Zemse <soham@zemse.in>"]
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/zemse/pdf-rs"
+homepage = "https://github.com/zemse/pdf-rs"
 keywords = ["pdf", "markdown", "extraction", "cli", "rag"]
 categories = ["command-line-utilities", "text-processing"]
 # Whitelist what ships (never blacklist).
