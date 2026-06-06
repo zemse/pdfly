@@ -279,6 +279,35 @@ mod tests {
     }
 
     #[test]
+    fn step_label_detection() {
+        assert!(is_step_label("1:"));
+        assert!(is_step_label("12:"));
+        assert!(is_step_label(" 3: "));
+        assert!(!is_step_label("1")); // page number, no colon
+        assert!(!is_step_label("1.")); // list marker
+        assert!(!is_step_label("a:"));
+        assert!(!is_step_label(":"));
+    }
+
+    #[test]
+    fn cluster_rejects_algorithm_step_labels() {
+        // A pseudocode listing: left column is "1:" "2:" "3:" step labels.
+        let lines = vec![
+            line("1:", 10.0, 100.0),
+            line("t", 40.0, 100.0),
+            line("6x+1", 80.0, 100.0),
+            line("2:", 10.0, 85.0),
+            line("p", 40.0, 85.0),
+            line("q-1", 80.0, 85.0),
+            line("3:", 10.0, 70.0),
+            line("x", 40.0, 70.0),
+            line("x+1", 80.0, 70.0),
+        ];
+        let (tables, _) = detect_cluster(&lines);
+        assert!(tables.is_empty(), "algorithm step labels are not a table");
+    }
+
+    #[test]
     fn cluster_ignores_single_column_prose() {
         let lines = vec![
             line("This is a paragraph line one", 10.0, 100.0),
@@ -443,6 +472,21 @@ fn is_grid_like(out_rows: &[Vec<Cell>], n_cols: usize) -> bool {
     if out_rows.len() < 3 || n_cols < 2 {
         return false;
     }
+    // Algorithm/pseudocode listings have a left column of step labels ("1:", "2:",
+    // …) that aligns like a table column and fools the cluster detector. A column
+    // that is mostly numeric labels with a trailing colon is a strong code-listing
+    // signal that real data tables don't exhibit — reject the block.
+    let col0_labels = out_rows
+        .iter()
+        .filter(|r| is_step_label(r[0].text.trim()))
+        .count();
+    let col0_filled = out_rows
+        .iter()
+        .filter(|r| !r[0].text.trim().is_empty())
+        .count();
+    if col0_filled >= 3 && col0_labels * 2 >= col0_filled {
+        return false;
+    }
     let n_rows = out_rows.len();
     let filled = out_rows
         .iter()
@@ -509,6 +553,13 @@ fn is_grid_like(out_rows: &[Vec<Cell>], n_cols: usize) -> bool {
         cl[cl.len() / 2] > 16
     });
     !col_is_prose
+}
+
+/// A pseudocode step label: digits followed by a colon ("1:", "12:"). The colon
+/// is required so plain numeric data columns (and page numbers) aren't matched.
+fn is_step_label(s: &str) -> bool {
+    let t = s.trim();
+    matches!(t.strip_suffix(':'), Some(d) if !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Sort + merge near-equal coordinates into representative grid lines.

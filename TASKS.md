@@ -40,59 +40,54 @@ fixed on 2026-06-06 (see below); the remainder are open.
 - [x] **Bare page numbers promoted to headings → fixed.** `###### 193`, `###### xii`
   etc. are no longer emitted as headings (a page-number/roman-numeral guard demotes
   them). Heading-size→level bucketing also coarsened to whole points so near-equal
-  sizes don't fragment the outline. h6 counts dropped (e.g. Rust for Rustaceans
-  690→624, with the bogus bare-number headings eliminated).
-  (`src/analyze/mod.rs::{is_page_number_like, assign_heading_levels}`)
+  sizes don't fragment the outline. (`src/analyze/mod.rs::{is_page_number_like,
+  assign_heading_levels}`)
 
-### Still open
+- [x] **Bold body-paragraph text split into per-line h6 headings → fixed.** Book
+  chapter intros set in a larger display font had every wrapped line promoted to a
+  heading ("…teaches you and what", "is always wide. Over time…"). A line starting
+  with a lowercase letter is now treated as prose, not a heading. h6 counts dropped
+  sharply (Rust for Rustaceans 624→383, Williams 825→554); academic-paper headings
+  unaffected. (`src/analyze/mod.rs`, `prose_fragment`)
 
-- [ ] **Two-column reading order scrambled.** `crypto-papers/2002.05231.pdf`:
-  left/right columns are interleaved mid-line, e.g. "shufﬂed sequence with
-  probability better than guessing. Itfor shufﬂing data encrypted under an
-  additively homomorphiallowsc multi-party computation". Gutter detection fails on
-  this layout. (Related to the multi-column roadmap item below; high-risk to retune
-  — see the reverted band-recursive note.)
+- [x] **Algorithm/pseudocode mis-detected as tables → fixed.** `crypto-papers/pairing-friendly-eliptic-curves-2005-133.pdf`
+  "Algorithm 1" no longer shreds into a 4-column table: a borderless block whose
+  left column is mostly step labels ("1:", "2:", …) is rejected. Other docs' table
+  counts unchanged (lookups 20, POSEIDON 45). (`src/analyze/tables.rs::is_step_label`)
 
-- [ ] **Heading *hierarchy* still imperfect (deeper than the page-number fix).**
-  Real chapter/section titles in some books still land on `######` instead of
-  h1/h2 because the size→level ranking maps the smallest heading size to the
-  deepest level. The bare-number flood is fixed; a proper hierarchy needs more than
-  font-size ranking (e.g. style/numbering cues, capping level count). Also: the
-  document title isn't always promoted to `#` (Thaler → `###`), author-affiliation
-  superscripts attach to names as headings, and HTML `<title>`/`lang` aren't
-  populated from detected metadata. Higher-risk; deferred.
+All of the above were validated on `opendataloader-bench` (200 docs): overall
+0.785 → **0.791**, mhs (heading hierarchy) 0.663 → **0.685**, nid/teds unchanged —
+i.e. net improvement, no regression. (See memory `opendataloader-bench-setup`.)
 
-- [ ] **Algorithm/pseudocode mis-detected as tables.** `crypto-papers/pairing-friendly-eliptic-curves-2005-133.pdf`
-  "Algorithm 1" pseudocode is shredded into garbled 4-column Markdown tables
-  (column-aligned line numbers + assignments trip the borderless-table heuristic).
-  A guard risks regressing real tables (the cluster detector already has several
-  precision guards); needs careful tuning against the benchmark. Deferred.
+### Still open — needs substantial work (not a quick/safe fix)
 
-- [ ] **Math super/subscripts flattened** (known limitation). `y2 = x3+b` instead
-  of `y² = x³+b`. Inherent without formula handling; see LaTeX-extraction below.
+- [ ] **Two-column reading order scrambled on tight-gutter pages.**
+  `crypto-papers/2002.05231.pdf` has a ~12pt gutter narrower than the
+  benchmark-tuned line-split threshold (`max(1.3·fs, 10pt)` ≈ 12.3pt here), so
+  left/right column runs merge into one line ("…guessing. Itfor shufﬂing…").
+  Lowering the global threshold regresses the benchmark (already swept — 1.3 won);
+  the real fix is **word-level column reconstruction** (use a detected gutter x to
+  split lines), a larger rework. Confirmed against the bench, not guessed.
 
-## Open roadmap (tractable)
+- [ ] **Heading *hierarchy* depth (the flood is fixed; depth isn't).** Real
+  chapter/section titles in some books still land on `######` because the size→level
+  ranking sends the smallest heading size to the deepest level. A faithful hierarchy
+  needs more than font-size ranking (numbering/style cues, level-count capping).
+  Also minor: document title not always `#` (Thaler → `###`), author-affiliation
+  superscripts attach to names, HTML `<title>`/`lang` not populated. Higher-risk.
 
-- [ ] **Dense academic multi-column edge cases.** Clean two-column pages read
-  correctly via gutter detection; a residual subset still interleaves columns
-  (see `2002.05231.pdf` above, and bench doc `01030000000012`). The *catastrophic*
-  NID failures in `opendataloader-bench` are extraction failures (scanned/vector/
-  chart pages with little/no embedded text — docs 5, 141, 27, 110, 200), which are
-  OCR-blocked, not reading-order bugs. The genuine multi-column residual is small.
-  *(A band-recursive rewrite was prototyped and reverted — naively treating
-  full-width spanners as band separators fragments full-width code listings in
-  two-column papers, e.g. `2408.02509v1`; high-risk for marginal gain.)*
+## Requires external assets — cannot be built or verified in this environment
 
-## Blocked in this environment (need external assets)
+These are not actionable here: each needs a model or test asset that doesn't exist
+locally. Listed so they aren't lost, not as pending work for this machine.
 
-- [ ] **Non-Latin OCR.** The OCR path works end-to-end (`--features ocr`), but the
-  bundled `ocrs` models are Latin-script. Validate with language-specific `.rten`
-  models for CJK/etc.
-- [ ] **LaTeX formula extraction.** Needs a local image→LaTeX vision model (e.g.
-  pix2tex via `rten`). Feature scaffolding only; no model available here to verify.
-- [ ] **Chart / image descriptions.** Needs a local VLM. Same constraint.
-- [ ] **Korean special-form tables.** Niche heuristic; no Korean test PDF available
-  to verify against, so deliberately not implemented blind.
+- **Non-Latin OCR.** The OCR path works end-to-end (`--features ocr`), but the
+  bundled `ocrs` models are Latin-script. Needs language-specific `.rten` models.
+- **LaTeX formula extraction** (covers the math super/subscript limitation, e.g.
+  `y2` vs `y²`). Needs a local image→LaTeX vision model (e.g. pix2tex via `rten`).
+- **Chart / image descriptions.** Needs a local VLM.
+- **Korean special-form tables.** No Korean test PDF available to verify against, so
+  deliberately not implemented blind.
 
 ## Explicitly NOT doing
 

@@ -361,6 +361,15 @@ fn classify_block(
             line.bold && line.font_size >= body_size * 0.95 && chars <= 60 && !sentence_like;
         let next_is_marker = i + 1 < lines.len() && list_marker(&lines[i + 1].text).is_some();
         let heading_ok = marker.is_none() || !next_is_marker;
+        // A line that starts with a lowercase letter is almost always a wrapped
+        // fragment of a flowing paragraph ("…teaches you and what", "is always
+        // wide. Over time…") — even when set in a larger display font, as book
+        // chapter intros often are. Real headings practically never start
+        // lowercase, so this reliably drains the false-heading flood.
+        let prose_fragment = trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase());
         // A bare number / roman numeral on its own line is almost always a page
         // number (common in tables of contents and front matter), not a heading —
         // promoting it floods the outline with bogus deep headings.
@@ -368,6 +377,7 @@ fn classify_block(
             && !trimmed.is_empty()
             && heading_ok
             && !is_page_number_like(trimmed)
+            && !prose_fragment
         {
             heading_sizes.push(line.font_size);
             out.push(Element::Heading {
