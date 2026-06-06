@@ -8,8 +8,28 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
     if runs.is_empty() {
         return vec![];
     }
-    // Sort by descending center-y, then left.
-    let mut idx: Vec<usize> = (0..runs.len()).collect();
+    // Rotated/vertical text (e.g. an arXiv side label) has a bbox far taller than
+    // its font size. Such a run must not join horizontal baseline grouping: its
+    // large font inflates the y-tolerance and its tall box spans many rows, pulling
+    // unrelated body lines into one group and scrambling them. Emit each as its own
+    // line and keep it out of the grouping below.
+    let is_rotated = |i: usize| {
+        let r = &runs[i];
+        r.font_size > 0.0 && r.bbox.height() > r.font_size * 2.5
+    };
+    let mut lines = Vec::new();
+    for i in 0..runs.len() {
+        if is_rotated(i) {
+            build_one_line(runs, &[i], &mut lines);
+        }
+    }
+    // Page-level column gutter (if any): a central vertical band that almost no
+    // run crosses. Used to split same-baseline runs from different columns even
+    // when the gutter is narrower than the generic gap threshold (tight two-column
+    // layouts otherwise merge "…left text.Right text…" into one scrambled line).
+    let gutter = detect_gutter(runs);
+    // Sort by descending center-y, then left (horizontal runs only).
+    let mut idx: Vec<usize> = (0..runs.len()).filter(|&i| !is_rotated(i)).collect();
     idx.sort_by(|&a, &b| {
         runs[b]
             .bbox
@@ -50,7 +70,6 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
         groups.push(cur);
     }
 
-    let mut lines = Vec::new();
     for g in groups {
         let mut g = g;
         g.sort_by(|&a, &b| runs[a].bbox.left.partial_cmp(&runs[b].bbox.left).unwrap());
@@ -67,7 +86,11 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
                 // column gutters, tab stops, and table-cell gaps. Tuned against
                 // opendataloader-bench — finer segmentation here improves reading
                 // order, heading separation, and borderless-table column recovery.
-                if gap > (fs * 1.3).max(10.0) {
+                let wide_gap = gap > (fs * 1.3).max(10.0);
+                // Also split when consecutive runs sit on opposite sides of the
+                // page column gutter, even if the raw gap is small (tight gutters).
+                let crosses_gutter = gutter.is_some_and(|gx| pr <= gx && runs[i].bbox.left >= gx);
+                if wide_gap || crosses_gutter {
                     segments.push(std::mem::take(&mut sub));
                 }
             }
@@ -82,6 +105,78 @@ pub fn build_lines(runs: &[TextRun]) -> Vec<Line> {
         }
     }
     lines
+}
+
+/// Detect a single dominant column gutter: a central vertical band that almost no
+/// text run crosses, with substantial text on both sides. Returns the gutter
+/// center x. Conservative — returns `None` for single-column pages (no central
+/// empty band) so their line assembly is unchanged.
+fn detect_gutter(runs: &[TextRun]) -> Option<f64> {
+    const N: usize = 100;
+    let mut left = f64::MAX;
+    let mut right = f64::MIN;
+    for r in runs {
+        left = left.min(r.bbox.left);
+        right = right.max(r.bbox.right);
+    }
+    let w = right - left;
+    if w <= 0.0 || runs.len() < 8 {
+        return None;
+    }
+    // Coverage histogram: how many runs cover each x-bin. Full-width spanners
+    // (titles, abstracts, full-width paragraphs) cross the gutter, so exclude them
+    // — otherwise they fill the central band and hide the gutter.
+    let mut cov = [0u32; N];
+    for r in runs {
+        if r.bbox.width() >= 0.55 * w {
+            continue;
+        }
+        let a = (((r.bbox.left - left) / w) * N as f64)
+            .floor()
+            .clamp(0.0, N as f64) as usize;
+        let b = (((r.bbox.right - left) / w) * N as f64)
+            .ceil()
+            .clamp(0.0, N as f64) as usize;
+        for c in cov.iter_mut().take(b.min(N)).skip(a) {
+            *c += 1;
+        }
+    }
+    // Longest near-zero-coverage run of bins in the central region [0.30, 0.70].
+    let max_cov = cov.iter().copied().max().unwrap_or(0);
+    if max_cov < 4 {
+        return None;
+    }
+    let floor = (max_cov as f64 * 0.03).ceil() as u32; // ≤3% of peak counts as "empty"
+    let (lo_bin, hi_bin) = ((N as f64 * 0.30) as usize, (N as f64 * 0.70) as usize);
+    let (mut best_start, mut best_len) = (0usize, 0usize);
+    let (mut run_start, mut run_len) = (0usize, 0usize);
+    for (k, &c) in cov.iter().enumerate().take(hi_bin).skip(lo_bin) {
+        if c <= floor {
+            if run_len == 0 {
+                run_start = k;
+            }
+            run_len += 1;
+            if run_len > best_len {
+                best_len = run_len;
+                best_start = run_start;
+            }
+        } else {
+            run_len = 0;
+        }
+    }
+    if best_len == 0 {
+        return None;
+    }
+    let center_bin = best_start + best_len / 2;
+    let gx = left + (center_bin as f64 / N as f64) * w;
+    // Require real content on both sides of the gutter.
+    let left_runs = runs.iter().filter(|r| r.bbox.right <= gx).count();
+    let right_runs = runs.iter().filter(|r| r.bbox.left >= gx).count();
+    if left_runs >= 3 && right_runs >= 3 {
+        Some(gx)
+    } else {
+        None
+    }
 }
 
 fn build_one_line(runs: &[TextRun], g: &[usize], lines: &mut Vec<Line>) {
@@ -154,4 +249,67 @@ fn collapse_spaces(s: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extract::Rect;
+
+    fn run(text: &str, l: f64, r: f64, cy: f64, fs: f64) -> TextRun {
+        TextRun {
+            text: text.into(),
+            bbox: Rect::new(l, cy - fs / 2.0, r, cy + fs / 2.0),
+            font_size: fs,
+            font_name: String::new(),
+            bold: false,
+            italic: false,
+            color: [0.0; 3],
+            mcid: None,
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn rotated_side_label_does_not_scramble_body_lines() {
+        // A tall vertical label (h >> font size) sits beside two body lines whose
+        // baselines are ~10pt apart — within the label's inflated tolerance. Before
+        // the rotated-text exclusion these three merged into one scrambled line.
+        let mut label = run("arXiv:2002.05231", 17.0, 37.0, 452.0, 20.0);
+        label.bbox = Rect::new(17.0, 252.0, 37.0, 652.0); // tall rotated box
+        let runs = vec![
+            label,
+            run("first body line here", 49.0, 273.0, 458.0, 9.0),
+            run("second body line here", 49.0, 296.0, 448.0, 9.0),
+        ];
+        let lines = build_lines(&runs);
+        // The two body lines stay separate (not merged through the label).
+        assert!(
+            lines.iter().any(|l| l.text == "first body line here"),
+            "got: {:?}",
+            lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
+        assert!(lines.iter().any(|l| l.text == "second body line here"));
+    }
+
+    #[test]
+    fn tight_gutter_splits_two_columns() {
+        // Two columns separated by a ~12pt gutter (49..150 | 162..260), each with
+        // several rows. Same-baseline left/right runs must not merge into one line.
+        let mut runs = Vec::new();
+        for k in 0..5 {
+            let y = 600.0 - k as f64 * 12.0;
+            runs.push(run("leftcol", 49.0, 150.0, y, 9.0));
+            runs.push(run("rightcol", 162.0, 260.0, y, 9.0));
+        }
+        let lines = build_lines(&runs);
+        // No line should contain both columns concatenated.
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.text == "leftcol" || l.text == "rightcol"),
+            "columns merged: {:?}",
+            lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
+    }
 }

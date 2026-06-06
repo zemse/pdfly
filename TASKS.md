@@ -55,19 +55,23 @@ fixed on 2026-06-06 (see below); the remainder are open.
   left column is mostly step labels ("1:", "2:", …) is rejected. Other docs' table
   counts unchanged (lookups 20, POSEIDON 45). (`src/analyze/tables.rs::is_step_label`)
 
+- [x] **Two-column reading order scrambled → fixed.** `crypto-papers/2002.05231.pdf`
+  read "…guessing. Itfor shufﬂing data…homomorphiallowsc…" — left/right columns
+  interleaved. Root cause was **not** the gutter width but a rotated arXiv side
+  label (`height ≫ font size`): its inflated baseline tolerance and full-page-tall
+  box pulled body lines from several rows (and both columns) into one group. Fix:
+  exclude rotated/vertical runs from horizontal baseline grouping (emit each as its
+  own line), plus split a baseline at a detected page column gutter even when the
+  gutter is narrower than the generic gap threshold. Now reads "…guessing. It allows
+  for shufﬂing data encrypted under an additively homomorphic…".
+  (`src/analyze/lines.rs::{detect_gutter, is_rotated}`)
+
 All of the above were validated on `opendataloader-bench` (200 docs): overall
-0.785 → **0.791**, mhs (heading hierarchy) 0.663 → **0.685**, nid/teds unchanged —
-i.e. net improvement, no regression. (See memory `opendataloader-bench-setup`.)
+0.785 → **0.790**, mhs (heading hierarchy) 0.663 → **0.685**, nid/teds unchanged
+(±0.001) — i.e. net improvement, no regression. (See memory
+`opendataloader-bench-setup`.)
 
 ### Still open — needs substantial work (not a quick/safe fix)
-
-- [ ] **Two-column reading order scrambled on tight-gutter pages.**
-  `crypto-papers/2002.05231.pdf` has a ~12pt gutter narrower than the
-  benchmark-tuned line-split threshold (`max(1.3·fs, 10pt)` ≈ 12.3pt here), so
-  left/right column runs merge into one line ("…guessing. Itfor shufﬂing…").
-  Lowering the global threshold regresses the benchmark (already swept — 1.3 won);
-  the real fix is **word-level column reconstruction** (use a detected gutter x to
-  split lines), a larger rework. Confirmed against the bench, not guessed.
 
 - [ ] **Heading *hierarchy* depth (the flood is fixed; depth isn't).** Real
   chapter/section titles in some books still land on `######` because the size→level
