@@ -553,13 +553,35 @@ fn merge_cross_page_tables(elements: &mut Vec<Element>) {
 /// from scaling) collapse into one level instead of fragmenting the outline and
 /// pushing most headings to h6.
 fn assign_heading_levels(elements: &mut [Element], sizes: &mut [f64]) {
-    let mut distinct: Vec<i64> = sizes.iter().map(|s| s.round() as i64).collect();
-    distinct.sort_unstable_by(|a, b| b.cmp(a));
-    distinct.dedup();
+    use std::collections::HashMap;
+    // Count headings per (point-rounded) size. One-off sizes — a single title-page
+    // display line, a stray large word — otherwise each consume a top level and
+    // push the recurring section-heading size down toward h6. Only sizes that
+    // recur define the level ladder; singletons snap to the nearest ladder size.
+    let mut counts: HashMap<i64, usize> = HashMap::new();
+    for s in sizes.iter() {
+        *counts.entry(s.round() as i64).or_insert(0) += 1;
+    }
+    let mut ladder: Vec<i64> = counts
+        .iter()
+        .filter(|&(_, &c)| c >= 2)
+        .map(|(&k, _)| k)
+        .collect();
+    // Fall back to all distinct sizes if nothing recurs (short docs).
+    if ladder.is_empty() {
+        ladder = counts.keys().copied().collect();
+    }
+    ladder.sort_unstable_by(|a, b| b.cmp(a));
+
     for el in elements.iter_mut() {
         if let Element::Heading { level, size, .. } = el {
             let key = size.round() as i64;
-            let rank = distinct.iter().position(|&d| d == key).unwrap_or(0);
+            // Nearest ladder rung at or above this size (so a one-off huge title
+            // maps to the top rung, not its own new level).
+            let rank = ladder
+                .iter()
+                .position(|&d| d <= key)
+                .unwrap_or(ladder.len().saturating_sub(1));
             *level = (rank as u8 + 1).min(6);
         }
     }

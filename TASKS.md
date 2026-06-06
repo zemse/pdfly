@@ -7,8 +7,10 @@ carried-over roadmap items (from the old `plan.md`) are at the bottom.
 
 Ran `pdfly read` over 32 PDFs in `~/Documents/PDFs` and `~/Documents/reading`
 (academic crypto papers, Rust books, legal text, trade paperbacks). No panics —
-all exited 0 — but the following correctness/quality bugs surfaced. Most were
-fixed on 2026-06-06 (see below); the remainder are open.
+all exited 0 — but several correctness/quality bugs surfaced. **All actionable
+bugs were fixed on 2026-06-06** (below), validated on the 200-doc benchmark. What
+remains is one structure-detection *limitation* and a set of items that need
+external ML models/assets not available in this environment.
 
 ### Fixed (2026-06-06)
 
@@ -66,19 +68,28 @@ fixed on 2026-06-06 (see below); the remainder are open.
   for shufﬂing data encrypted under an additively homomorphic…".
   (`src/analyze/lines.rs::{detect_gutter, is_rotated}`)
 
+- [x] **Heading level assignment made frequency-aware.** A one-off display size (a
+  title-page line, a stray large word) used to consume a top level and push the
+  recurring section-heading size toward h6. Now only sizes used by ≥2 headings
+  define the level ladder; singletons snap to the nearest rung. Benchmark-neutral;
+  reduces book h6 counts further. (`src/analyze/mod.rs::assign_heading_levels`)
+
 All of the above were validated on `opendataloader-bench` (200 docs): overall
 0.785 → **0.790**, mhs (heading hierarchy) 0.663 → **0.685**, nid/teds unchanged
 (±0.001) — i.e. net improvement, no regression. (See memory
 `opendataloader-bench-setup`.)
 
-### Still open — needs substantial work (not a quick/safe fix)
+### Known limitation (not a bug — needs structure-aware detection)
 
-- [ ] **Heading *hierarchy* depth (the flood is fixed; depth isn't).** Real
-  chapter/section titles in some books still land on `######` because the size→level
-  ranking sends the smallest heading size to the deepest level. A faithful hierarchy
-  needs more than font-size ranking (numbering/style cues, level-count capping).
-  Also minor: document title not always `#` (Thaler → `###`), author-affiliation
-  superscripts attach to names, HTML `<title>`/`lang` not populated. Higher-risk.
+- Some books still render their (smallest-font, all-caps) section titles at a deep
+  level: with **font-size ranking alone**, a title that is genuinely the smallest
+  heading size legitimately ranks last. Recovering a book's *intended* hierarchy
+  (these are conceptually h2) needs structure cues — heading numbering, ToC
+  cross-referencing, or the tagged structure tree (`--use-struct-tree` already does
+  this when the PDF is tagged) — not font size. A larger design change, tracked as
+  a limitation rather than a quick fix. Minor related items: document title not
+  always promoted to `#`, author-affiliation superscripts attach to author names,
+  and HTML `<title>`/`lang` aren't populated from detected metadata.
 
 ## Requires external assets — cannot be built or verified in this environment
 
