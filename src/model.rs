@@ -22,6 +22,10 @@ pub struct ListItem {
     pub bbox: Rect,
     /// Nesting depth (0 = top level), inferred from left indentation.
     pub level: usize,
+    /// Original ordered-list marker as written (e.g. "34.", "52)"), preserved so
+    /// renderers keep the document's real numbering instead of renumbering from 1.
+    /// `None` for bullet lists or when no explicit marker was captured.
+    pub marker: Option<String>,
 }
 
 /// A table cell.

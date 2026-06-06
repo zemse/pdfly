@@ -63,6 +63,9 @@ pub fn process_images(
                 continue;
             }
             let Some(data) = lookup.get(&(*page, name.as_str())).copied() else {
+                // Image XObject couldn't be decoded (unsupported filter/colorspace,
+                // e.g. JBIG2/CCITT/JPEG2000/Indexed). Mark it for removal rather
+                // than emitting a broken `![]()` link.
                 *name = String::new();
                 continue;
             };
@@ -92,6 +95,11 @@ pub fn process_images(
             *name = link;
         }
     }
+    // Drop images that couldn't be resolved to a link (undecodable XObjects),
+    // so renderers never emit an empty `![]()`.
+    analyzed
+        .elements
+        .retain(|e| !matches!(e, Element::Image { name, .. } if name.is_empty()));
     Ok(count)
 }
 

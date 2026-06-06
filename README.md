@@ -105,7 +105,7 @@ A from-scratch Rust reimplementation of the data-extraction core of
 [opendataloader-pdf](https://github.com/opendataloader-project/opendataloader-pdf)
 (Apache-2.0). Algorithms were studied and reimplemented clean-room; no code was
 copied. See [ARCHITECTURE.md](./ARCHITECTURE.md) for how the original works and
-[PLAN.md](./PLAN.md) for the build plan. The XY-Cut++ reading order follows
+[TASKS.md](./TASKS.md) for open issues and remaining work. The XY-Cut++ reading order follows
 opendataloader's `XYCutPlusPlusSorter`; layout heuristics are informed by
 veraPDF's `wcag-algorithms`.
 

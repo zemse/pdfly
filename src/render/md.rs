@@ -60,7 +60,15 @@ fn render_one(el: &Element, opts: &RenderOptions, out: &mut String) {
                 }
                 if *ordered {
                     counters[lvl] += 1;
-                    out.push_str(&format!("{}. ", counters[lvl]));
+                    // Preserve the document's real marker (e.g. legal section
+                    // numbers, ToC entries) when captured; else renumber from 1.
+                    match &item.marker {
+                        Some(m) => {
+                            out.push_str(m);
+                            out.push(' ');
+                        }
+                        None => out.push_str(&format!("{}. ", counters[lvl])),
+                    }
                 } else {
                     out.push_str("- ");
                 }

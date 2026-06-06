@@ -145,8 +145,9 @@ pub struct Page {
     pub runs: Vec<TextRun>,
     pub images: Vec<ImageObj>,
     pub lines: Vec<LineSeg>,
-    /// Decoded image XObjects on this page, keyed by resource name.
-    pub image_data: std::collections::HashMap<String, ImageData>,
+    /// Decoded image XObjects on this page, keyed by resource name. Shared
+    /// (`Arc`) so images in inherited resources are decoded once, not per page.
+    pub image_data: std::collections::HashMap<String, std::sync::Arc<ImageData>>,
 }
 
 #[derive(Clone, Debug, Default)]

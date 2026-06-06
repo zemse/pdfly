@@ -49,6 +49,21 @@ fn pps(pages: usize, secs: f64) -> f64 {
     if secs > 0.0 { pages as f64 / secs } else { 0.0 }
 }
 
+/// Total length of rendered text across all elements (used to detect a document
+/// that extracted to nothing).
+fn text_len(doc: &crate::model::AnalyzedDoc) -> usize {
+    use crate::model::Element;
+    doc.elements
+        .iter()
+        .map(|e| match e {
+            Element::Heading { text, .. } | Element::Paragraph { text, .. } => text.trim().len(),
+            Element::List { items, .. } => items.iter().map(|i| i.text.trim().len()).sum(),
+            Element::Table { rows, .. } => rows.iter().flatten().map(|c| c.text.trim().len()).sum(),
+            Element::Image { .. } => 0,
+        })
+        .sum()
+}
+
 /// Process a single PDF; returns the number of pages analyzed (for throughput).
 fn process_one(
     cli: &ReadArgs,
@@ -76,6 +91,18 @@ fn process_one(
             cluster_tables: cli.table_method == "cluster",
         },
     );
+
+    // A PDF that yields no extractable text is almost always image-only (scanned)
+    // or uses fonts we can't map to Unicode (e.g. Type3 with opaque glyph names,
+    // no /ToUnicode). Warn instead of writing a silent empty file.
+    if !cli.quiet && analyzed.num_pages > 0 && text_len(&analyzed) == 0 {
+        eprintln!(
+            "warning: no extractable text found in {} ({} page(s)). \
+             It may be scanned/image-only (try --features ocr) or use fonts without Unicode mappings.",
+            file.display(),
+            analyzed.num_pages
+        );
+    }
 
     let ropts = RenderOptions {
         page_separator: cli.page_separator.clone(),

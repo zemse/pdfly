@@ -4,6 +4,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use lopdf::content::Content;
@@ -33,6 +35,14 @@ impl super::PdfBackend for LopdfBackend {
         let page_index = page_number_map(&doc);
         let structure = parse_structure(&doc, &page_index);
         let mut out_pages = Vec::new();
+        // Fonts are referenced by the same object across many pages; building one
+        // (parsing the embedded program, reverse-mapping its cmap) is expensive,
+        // so memoize by ObjectId and reuse across pages.
+        let mut font_cache: HashMap<ObjectId, Rc<Font>> = HashMap::new();
+        // Images are likewise shared across pages via inherited resources;
+        // decoding (Flate + PNG-predictor) is costly, so memoize by ObjectId.
+        // `None` records an undecodable image so we don't retry it per page.
+        let mut image_cache: HashMap<ObjectId, Option<Arc<super::ImageData>>> = HashMap::new();
         for (page_num, page_id) in doc.get_pages() {
             let n = page_num as usize;
             if let Some(sel) = pages {
@@ -40,7 +50,7 @@ impl super::PdfBackend for LopdfBackend {
                     continue;
                 }
             }
-            match extract_page(&doc, n, page_id) {
+            match extract_page(&doc, n, page_id, &mut font_cache, &mut image_cache) {
                 Ok(p) => out_pages.push(p),
                 Err(e) => {
                     eprintln!("warning: page {n} failed: {e}");
@@ -280,10 +290,16 @@ fn decode_pdf_text(bytes: &[u8]) -> String {
     }
 }
 
-fn extract_page(doc: &Document, number: usize, page_id: ObjectId) -> Result<Page> {
+fn extract_page(
+    doc: &Document,
+    number: usize,
+    page_id: ObjectId,
+    font_cache: &mut HashMap<ObjectId, Rc<Font>>,
+    image_cache: &mut HashMap<ObjectId, Option<Arc<super::ImageData>>>,
+) -> Result<Page> {
     let media_box = page_media_box(doc, page_id);
-    let fonts = page_fonts(doc, page_id);
-    let (xobjects, image_data) = page_images(doc, page_id);
+    let fonts = page_fonts(doc, page_id, font_cache);
+    let (xobjects, image_data) = page_images(doc, page_id, image_cache);
 
     let content_data = doc.get_page_content(page_id).context("get_page_content")?;
     let content = Content::decode(&content_data).context("decode content stream")?;
@@ -303,7 +319,7 @@ fn extract_page(doc: &Document, number: usize, page_id: ObjectId) -> Result<Page
 
 /// Graphics + text state, mutated as we walk operations.
 struct Interp<'a> {
-    fonts: &'a HashMap<String, Font>,
+    fonts: &'a HashMap<String, Rc<Font>>,
     xobjects: &'a HashMap<String, ()>,
     // graphics
     ctm: Matrix,
@@ -312,7 +328,7 @@ struct Interp<'a> {
     // text
     tm: Matrix,
     tlm: Matrix,
-    font: Option<Font>,
+    font: Option<Rc<Font>>,
     font_name: String,
     font_size: f64,
     char_spacing: f64,
@@ -334,7 +350,7 @@ struct Interp<'a> {
 }
 
 impl<'a> Interp<'a> {
-    fn new(fonts: &'a HashMap<String, Font>, xobjects: &'a HashMap<String, ()>) -> Self {
+    fn new(fonts: &'a HashMap<String, Rc<Font>>, xobjects: &'a HashMap<String, ()>) -> Self {
         Interp {
             fonts,
             xobjects,
@@ -747,16 +763,33 @@ fn as_dict_owned(doc: &Document, o: &Object) -> Option<Dictionary> {
     }
 }
 
-fn page_fonts(doc: &Document, page_id: ObjectId) -> HashMap<String, Font> {
+fn page_fonts(
+    doc: &Document,
+    page_id: ObjectId,
+    cache: &mut HashMap<ObjectId, Rc<Font>>,
+) -> HashMap<String, Rc<Font>> {
     let mut map = HashMap::new();
     let Some(res) = page_resources(doc, page_id) else {
         return map;
     };
     if let Some(font_dict) = res.get(b"Font").ok().and_then(|o| as_dict_owned(doc, o)) {
         for (name, val) in font_dict.iter() {
-            if let Ok(fd) = resolve(doc, val).and_then(|o| o.as_dict().map(|d| d.clone())) {
-                let key = String::from_utf8_lossy(name).into_owned();
-                map.insert(key, build_font(doc, &fd));
+            let key = String::from_utf8_lossy(name).into_owned();
+            // Reuse a previously-built font when the resource points at a shared
+            // object (the common case) — keyed by its ObjectId.
+            if let Object::Reference(id) = val {
+                if let Some(font) = cache.get(id) {
+                    map.insert(key, font.clone());
+                    continue;
+                }
+                if let Ok(fd) = resolve(doc, val).and_then(|o| o.as_dict().map(|d| d.clone())) {
+                    let font = Rc::new(build_font(doc, &fd));
+                    cache.insert(*id, font.clone());
+                    map.insert(key, font);
+                }
+            } else if let Ok(fd) = resolve(doc, val).and_then(|o| o.as_dict().map(|d| d.clone())) {
+                // Inline font dictionary (no shared object to cache by).
+                map.insert(key, Rc::new(build_font(doc, &fd)));
             }
         }
     }
@@ -766,7 +799,8 @@ fn page_fonts(doc: &Document, page_id: ObjectId) -> HashMap<String, Font> {
 fn page_images(
     doc: &Document,
     page_id: ObjectId,
-) -> (HashMap<String, ()>, HashMap<String, super::ImageData>) {
+    cache: &mut HashMap<ObjectId, Option<Arc<super::ImageData>>>,
+) -> (HashMap<String, ()>, HashMap<String, Arc<super::ImageData>>) {
     let mut names = HashMap::new();
     let mut data = HashMap::new();
     let Some(res) = page_resources(doc, page_id) else {
@@ -774,12 +808,27 @@ fn page_images(
     };
     if let Some(xo) = res.get(b"XObject").ok().and_then(|o| as_dict_owned(doc, o)) {
         for (name, val) in xo.iter() {
+            let key = String::from_utf8_lossy(name).into_owned();
+            // Decode each shared image XObject at most once (keyed by ObjectId);
+            // inherited resources otherwise re-decode the same images per page.
+            if let Object::Reference(id) = val {
+                if let Some(slot) = cache.get(id) {
+                    names.insert(key.clone(), ());
+                    if let Some(img) = slot {
+                        data.insert(key, img.clone());
+                    }
+                    continue;
+                }
+            }
             if let Ok(Object::Stream(s)) = resolve(doc, val) {
                 if subtype_is(&s.dict, "Image") {
-                    let key = String::from_utf8_lossy(name).into_owned();
                     names.insert(key.clone(), ());
-                    if let Some(img) = decode_image(doc, s) {
-                        data.insert(key, img);
+                    let decoded = decode_image(doc, s).map(Arc::new);
+                    if let Some(img) = &decoded {
+                        data.insert(key, img.clone());
+                    }
+                    if let Object::Reference(id) = val {
+                        cache.insert(*id, decoded);
                     }
                 }
             }

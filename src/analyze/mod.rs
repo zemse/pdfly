@@ -361,7 +361,14 @@ fn classify_block(
             line.bold && line.font_size >= body_size * 0.95 && chars <= 60 && !sentence_like;
         let next_is_marker = i + 1 < lines.len() && list_marker(&lines[i + 1].text).is_some();
         let heading_ok = marker.is_none() || !next_is_marker;
-        if (is_larger || is_bold_short) && !trimmed.is_empty() && heading_ok {
+        // A bare number / roman numeral on its own line is almost always a page
+        // number (common in tables of contents and front matter), not a heading —
+        // promoting it floods the outline with bogus deep headings.
+        if (is_larger || is_bold_short)
+            && !trimmed.is_empty()
+            && heading_ok
+            && !is_page_number_like(trimmed)
+        {
             heading_sizes.push(line.font_size);
             out.push(Element::Heading {
                 level: 0, // filled in globally
@@ -377,14 +384,19 @@ fn classify_block(
         // List item?
         if let Some((ordered, _marker)) = marker {
             // Gather consecutive list items.
-            let mut raw: Vec<(String, Rect, bool)> = Vec::new();
+            let mut raw: Vec<(String, Rect, bool, Option<String>)> = Vec::new();
             let mut bbox = Rect::empty();
             let mut ord = ordered;
             while i < lines.len() {
                 if let Some((o2, _)) = list_marker(&lines[i].text) {
                     let txt = strip_marker(&lines[i].text);
+                    let mk = if o2 {
+                        ordered_marker(&lines[i].text)
+                    } else {
+                        None
+                    };
                     bbox.union(&lines[i].bbox);
-                    raw.push((txt, lines[i].bbox, o2));
+                    raw.push((txt, lines[i].bbox, o2, mk));
                     ord = ord || o2;
                     i += 1;
                 } else {
@@ -392,16 +404,20 @@ fn classify_block(
                 }
             }
             // Infer nesting depth from left indentation (relative to min left).
-            let min_left = raw.iter().map(|(_, b, _)| b.left).fold(f64::MAX, f64::min);
+            let min_left = raw
+                .iter()
+                .map(|(_, b, _, _)| b.left)
+                .fold(f64::MAX, f64::min);
             let items: Vec<ListItem> = raw
                 .into_iter()
-                .map(|(text, b, _)| {
+                .map(|(text, b, _, marker)| {
                     let indent = (b.left - min_left).max(0.0);
                     let level = (indent / 18.0).round() as usize; // ~1 level per 18pt
                     ListItem {
                         text,
                         bbox: b,
                         level: level.min(5),
+                        marker,
                     }
                 })
                 .collect();
@@ -523,17 +539,39 @@ fn merge_cross_page_tables(elements: &mut Vec<Element>) {
 }
 
 /// Map distinct heading font sizes (descending) to levels 1..=6 across the doc.
+/// Sizes are bucketed to the nearest point so near-identical sizes (13.0 vs 13.04
+/// from scaling) collapse into one level instead of fragmenting the outline and
+/// pushing most headings to h6.
 fn assign_heading_levels(elements: &mut [Element], sizes: &mut [f64]) {
-    let mut distinct: Vec<i64> = sizes.iter().map(|s| (s * 2.0).round() as i64).collect();
+    let mut distinct: Vec<i64> = sizes.iter().map(|s| s.round() as i64).collect();
     distinct.sort_unstable_by(|a, b| b.cmp(a));
     distinct.dedup();
     for el in elements.iter_mut() {
         if let Element::Heading { level, size, .. } = el {
-            let key = (*size * 2.0).round() as i64;
+            let key = size.round() as i64;
             let rank = distinct.iter().position(|&d| d == key).unwrap_or(0);
             *level = (rank as u8 + 1).min(6);
         }
     }
+}
+
+/// True when `s` is just a page number: a short run of digits, or a roman
+/// numeral (upper or lower case).
+fn is_page_number_like(s: &str) -> bool {
+    let t = s.trim();
+    let n = t.chars().count();
+    if n == 0 || n > 6 {
+        return false;
+    }
+    if t.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    t.chars().all(|c| {
+        matches!(
+            c.to_ascii_lowercase(),
+            'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'
+        )
+    })
 }
 
 /// Return (ordered, marker_len) if the line begins with a list marker.
@@ -565,6 +603,25 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
         && (bytes[1] == b'.' || bytes[1] == b')')
     {
         return Some((true, 2));
+    }
+    None
+}
+
+/// The literal ordered-list marker at the start of `text` (e.g. "34.", "5)"),
+/// including its trailing separator. Returns `None` if there's no numeric or
+/// single-letter marker. ASCII-only, so byte indexing is safe.
+fn ordered_marker(text: &str) -> Option<String> {
+    let t = text.trim_start();
+    let bytes = t.as_bytes();
+    let mut k = 0;
+    while k < bytes.len() && bytes[k].is_ascii_digit() {
+        k += 1;
+    }
+    if k > 0 && k < bytes.len() && (bytes[k] == b'.' || bytes[k] == b')') {
+        return Some(t[..=k].to_string());
+    }
+    if bytes.len() > 1 && bytes[0].is_ascii_alphabetic() && (bytes[1] == b'.' || bytes[1] == b')') {
+        return Some(t[..2].to_string());
     }
     None
 }
@@ -656,4 +713,38 @@ fn find_caption(elements: &[Element], img: &Rect) -> Option<usize> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordered_marker_preserves_literal_number() {
+        assert_eq!(ordered_marker("34. Acts done"), Some("34.".into()));
+        assert_eq!(
+            ordered_marker("230. \u{201c}Coin\u{201d}"),
+            Some("230.".into())
+        );
+        assert_eq!(ordered_marker("5) item"), Some("5)".into()));
+        assert_eq!(ordered_marker("a. lettered"), Some("a.".into()));
+        assert_eq!(ordered_marker("  12.  indented"), Some("12.".into()));
+        // No marker.
+        assert_eq!(ordered_marker("just prose"), None);
+        assert_eq!(ordered_marker("52A. mixed"), None); // digits then letter, not a list
+    }
+
+    #[test]
+    fn page_number_like_detects_numbers_and_roman() {
+        assert!(is_page_number_like("193"));
+        assert!(is_page_number_like("1"));
+        assert!(is_page_number_like("xii"));
+        assert!(is_page_number_like("XIV"));
+        assert!(is_page_number_like("iv"));
+        // Not page numbers.
+        assert!(!is_page_number_like("Introduction"));
+        assert!(!is_page_number_like("1234567")); // too long
+        assert!(!is_page_number_like("3.1")); // section number, has a dot
+        assert!(!is_page_number_like(""));
+    }
 }

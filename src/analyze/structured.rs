@@ -163,6 +163,7 @@ fn emit(elem: &StructElem, map: &McidText, out: &mut Vec<Element>, depth: usize)
                             text,
                             bbox: b,
                             level: 0,
+                            marker: None,
                         });
                     }
                 }
